@@ -1,0 +1,11 @@
+name = "claude-code-usage-dashboard"
+main = "./workers/app.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+assets = { directory = "./build/client" }
+
+[[d1_databases]]
+binding = "DB"
+database_name = "claude-code-usage"
+database_id = "<TODO: wrangler d1 create で生成>"
+migrations_dir = "migrations"
