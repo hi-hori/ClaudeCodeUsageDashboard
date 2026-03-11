@@ -305,8 +305,8 @@ def post_to_api(dashboard_url, payload) -> None:
         "User-Agent": "claude-code-usage-dashboard/1.0",  # Botと判定されないようにするため
     }
 
-    client_id = os.environ.get("CF_ACCESS_CLIENT_ID", "")
-    client_secret = os.environ.get("CF_ACCESS_CLIENT_SECRET", "")
+    client_id = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_ID", "")
+    client_secret = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_SECRET", "")
     if client_id and client_secret:
         headers["CF-Access-Client-Id"] = client_id
         headers["CF-Access-Client-Secret"] = client_secret
