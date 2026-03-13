@@ -7,5 +7,5 @@ assets = { directory = "./build/client" }
 [[d1_databases]]
 binding = "DB"
 database_name = "claude-code-usage"
-database_id = "<TODO: wrangler d1 create で生成>"
+database_id = "xxxxxxxx"
 migrations_dir = "migrations"
