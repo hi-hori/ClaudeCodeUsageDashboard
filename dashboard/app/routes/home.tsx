@@ -11,8 +11,8 @@ import { RecentSessionsTable } from "~/components/RecentSessionsTable";
 
 export function meta() {
   return [
-    { title: "Claude Code 利用状況ダッシュボード" },
-    { name: "description", content: "SecDev-Lab チームの Claude Code 活用状況" },
+    { title: "Claude Code Usage Dashboard" },
+    { name: "description", content: "Visualize Claude Code usage across your team" },
   ];
 }
 
@@ -41,7 +41,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-            Claude Code 利用状況ダッシュボード
+            Claude Code Usage Dashboard
           </h1>
         </div>
       </header>
@@ -58,11 +58,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <UserRankingChart data={data.userRanking} />
           <DistributionPieChart
-            title="スキル利用分布"
+            title="Skill Distribution"
             data={data.skillDistribution}
           />
           <DistributionPieChart
-            title="MCPサーバー利用分布"
+            title="MCP Server Distribution"
             data={data.mcpDistribution}
           />
         </div>
@@ -73,11 +73,11 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
         {/* Row 3: Model Distribution + Subagent Distribution + Daily Tool Usage */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <DistributionPieChart
-            title="モデル利用分布"
+            title="Model Distribution"
             data={data.modelDistribution}
           />
           <DistributionPieChart
-            title="サブエージェント利用分布"
+            title="Sub-agent Distribution"
             data={data.subagentDistribution}
           />
           <DailyToolUsageChart data={data.dailyToolUsage} />

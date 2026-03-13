@@ -25,7 +25,7 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ja">
+    <html lang="en">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -46,15 +46,15 @@ export default function App() {
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
-  let message = "エラーが発生しました";
-  let details = "予期しないエラーが発生しました。";
+  let message = "An error occurred";
+  let details = "An unexpected error occurred.";
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "エラー";
+    message = error.status === 404 ? "404" : "Error";
     details =
       error.status === 404
-        ? "お探しのページが見つかりませんでした。"
+        ? "The page you are looking for could not be found."
         : error.statusText || details;
   } else if (import.meta.env.DEV && error && error instanceof Error) {
     details = error.message;
@@ -75,7 +75,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           href="/"
           className="inline-block mt-4 text-blue-600 hover:text-blue-800"
         >
-          ホームに戻る
+          Back to Home
         </a>
       </div>
     </main>

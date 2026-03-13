@@ -1,139 +1,139 @@
-# デプロイ手順
+# Deployment Guide
 
-`dashboard/` を Cloudflare Workers + D1 にデプロイする手順です。
+Steps to deploy `dashboard/` to Cloudflare Workers + D1.
 
-## 前提条件
+## Prerequisites
 
-- Cloudflare アカウント
-- Wrangler CLI インストール・ログイン済み
+- Cloudflare account
+- Wrangler CLI installed and logged in
 
 ```bash
 npm install -g wrangler
 wrangler login
 ```
 
-## 初回セットアップ
+## Initial Setup
 
-### 1. D1 データベース作成
+### 1. Create a D1 database
 
 ```bash
 wrangler d1 create claude-code-usage
 ```
 
-出力例:
+Example output:
 
 ```
 ✅ Successfully created DB 'claude-code-usage'
 database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-### 2. デプロイ
+### 2. Deploy
 
-出力された `database_id` を指定してデプロイスクリプトを実行します。
-database_id の設定、マイグレーション適用、デプロイを一括で行います。
+Run the deploy script with the `database_id` from the previous step.
+It sets the database_id, applies migrations, and deploys in one step.
 
 ```bash
 ./deploy/deploy.sh <database_id>
 ```
 
-デプロイ完了後、Workers の URL がターミナルに表示されます（例: `https://claude-code-usage-dashboard.<account>.workers.dev`）。
+The Workers URL will be displayed after deployment (e.g. `https://claude-code-usage-dashboard.<account>.workers.dev`).
 
-2回目以降のデプロイも同じコマンドで実行できます。
+Subsequent deployments can use the same command.
 
-## Zero Trust 設定（認証・初回のみ手動）
+## Zero Trust Setup (Authentication — one-time manual setup)
 
-Cloudflare Zero Trust でアクセス制御を行います。
-ダッシュボード閲覧（ブラウザ）と Ingest API（Stop フック）の 2 種類の認証を 1 つの Access Application で設定します。
+Configure access control with Cloudflare Zero Trust.
+A single Access Application handles two types of authentication: dashboard access (browser) and Ingest API (Stop hook).
 
-### ステップ 1: Access Application を作成
+### Step 1: Create an Access Application
 
-1. [Cloudflare Zero Trust ダッシュボード](https://one.dash.cloudflare.com/) → **Access controls** → **Applications**
-2. **Add an application** → **Self-hosted** を選択
-3. Basic information を設定:
+1. [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) → **Access controls** → **Applications**
+2. **Add an application** → Select **Self-hosted**
+3. Set Basic information:
 
-| 項目 | 値 |
-|------|---|
+| Field | Value |
+|-------|-------|
 | Application name | `Claude Code Usage Dashboard` |
-| Session Duration | `24 hours`（任意） |
+| Session Duration | `24 hours` (optional) |
 
-4. **+ Add public hostname** をクリックし、Workers の URL を入力:
+4. Click **+ Add public hostname** and enter the Workers URL:
 
-| 項目 | 値 |
-|------|---|
+| Field | Value |
+|-------|-------|
 | Subdomain | `claude-code-usage-dashboard` |
 | Domain | `<account>.workers.dev` |
 
-### ステップ 2: ダッシュボード閲覧用ポリシー
+### Step 2: Dashboard access policy
 
-Application 内で 1 つ目の Policy を作成します。組織の認証要件に応じて設定してください。
+Create the first Policy in the Application. Configure according to your organization's authentication requirements.
 
-設定例：
+Example:
 
-| 項目 | 値 |
-|------|---|
+| Field | Value |
+|-------|-------|
 | Policy name | `Allow Developer members` |
 | Action | **Allow** |
 | Include rule | Emails ending in `@example.com` |
-| Identity providers | **Google** を選択 |
+| Identity providers | Select **Google** |
 
 
-### ステップ 3: Service Token の作成（Ingest API 用）
+### Step 3: Create a Service Token (for Ingest API)
 
-Stop フックからの API 送信に使用する Service Token を作成します。
+Create a Service Token for API submissions from the Stop hook.
 
-1. Zero Trust ダッシュボード → **Access control** → **Service Credentials** → **Service Tokens**
-2. **Create Service Token** をクリック
-3. 名前: `Claude Code Usage Dashboard Ingest`
-4. 発行された `CF-Access-Client-Id` と `CF-Access-Client-Secret` を控える
+1. Zero Trust dashboard → **Access control** → **Service Credentials** → **Service Tokens**
+2. Click **Create Service Token**
+3. Name: `Claude Code Usage Dashboard Ingest`
+4. Save the issued `CF-Access-Client-Id` and `CF-Access-Client-Secret`
 
 
-### ステップ 4: Service Token ポリシーの追加
+### Step 4: Add a Service Token policy
 
-ステップ 1 で作成した Access Application に 2 つ目の Policy を追加します:
+Add a second Policy to the Access Application created in Step 1:
 
-| 項目 | 値 |
-|------|---|
+| Field | Value |
+|-------|-------|
 | Policy name | `Allow Ingest API Service Token` |
 | Action | **Service Auth** |
-| Include rule | Service Token → `Claude Code Usage Dashboard Ingest` を選択 |
+| Include rule | Service Token → Select `Claude Code Usage Dashboard Ingest` |
 
-これにより、`CF-Access-Client-Id` / `CF-Access-Client-Secret` ヘッダー付きリクエストは認証を通過します。
+This allows requests with `CF-Access-Client-Id` / `CF-Access-Client-Secret` headers to pass authentication.
 
 
-## チームメンバーへの配布
+## Team Distribution
 
-各メンバーがプラグインをインストールし、環境変数を設定します。
-手順はルートの [README.md](../README.md) の「セットアップ」を参照してください。
+Each team member installs the plugin and sets environment variables.
+See the "Setup" section in the root [README.md](../README.md).
 
-Zero Trust を使用する場合は、`.env` に以下も追加します:
+When using Zero Trust, also add the following to `.env`:
 
 ```bash
 CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_ID="<Client ID>"
 CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_SECRET="<Client Secret>"
 ```
 
-## スキーマ更新時
+## Schema Updates
 
-`migrations/` に新しいマイグレーション SQL を追加した場合:
+When new migration SQL files are added to `migrations/`:
 
 ```bash
 wrangler d1 migrations apply claude-code-usage --remote
 ```
 
-> ローカル環境には `--local` フラグで適用します。
+> For local environments, use the `--local` flag.
 
-## DB リセット（全データ削除 + スキーマ再作成）
+## DB Reset (Delete all data + recreate schema)
 
-スキーマに破壊的変更を加えた場合など、DB をクリーンな状態に戻す手順です。
+Use this to reset the DB to a clean state, e.g. after breaking schema changes.
 
-> **注意**: 全データが削除されます。本番運用中は十分注意してください。
+> **Warning**: All data will be deleted. Use with caution in production.
 
 ```bash
 cd dashboard
 
-# 1. 全テーブルとマイグレーション履歴を削除
+# 1. Drop all tables and migration history
 wrangler d1 execute claude-code-usage --remote --command "DROP TABLE IF EXISTS subagent_usage_events; DROP TABLE IF EXISTS mcp_usage_events; DROP TABLE IF EXISTS skill_usage_events; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
 
-# 2. マイグレーション再適用
+# 2. Re-apply migrations
 wrangler d1 migrations apply claude-code-usage --remote
 ```

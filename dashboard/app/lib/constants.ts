@@ -1,8 +1,8 @@
 // --- Period filter ---
 export const PERIOD_OPTIONS = [
-  { days: 7, label: "7日" },
-  { days: 30, label: "30日" },
-  { days: 0, label: "全期間" },
+  { days: 7, label: "7d" },
+  { days: 30, label: "30d" },
+  { days: 0, label: "All" },
 ] as const;
 
 export const DEFAULT_DAYS = 7;

@@ -1,118 +1,117 @@
 # Claude Code Usage Dashboard
 
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) の利用状況をチームで可視化・共有できるセルフホスト型ダッシュボードです。
+A self-hosted dashboard to visualize and share [Claude Code](https://docs.anthropic.com/en/docs/claude-code) usage across your team.
 
-セッション終了時に Stop フックがトランスクリプトを自動解析・保存し、トークン消費量、スキル・MCP・サブエージェントの利用状況、推定コストなどをチャートで表示します。
+A Stop hook automatically parses transcripts at session end, collecting token consumption, skill / MCP / sub-agent usage, and estimated costs into interactive charts.
 
-![ダッシュボード](docs/images/dashboard-screenshot.png)
+![Dashboard](docs/images/dashboard-screenshot.png)
 
-## 主な機能
+## Features
 
-- **Claude Codeデータ収集** — Stop フックによるゼロコンフィグのデータ収集
-- **トークン・コスト追跡** — input / output / cache read / cache creation トークンとモデル別コスト推定
-- **スキル利用分析** — `/commit`, `/fixissue` 等のスキル呼び出し頻度
-- **MCP サーバー分析** — MCP サーバー名・メソッド別の呼び出し状況
-- **サブエージェント分析** — Agent ツールの利用状況（Explore, Plan 等）
-- **チーム概況** — ユーザー別コストランキング、日次トレンド、モデル分布
+- **Data Collection** — Zero-config data collection via Stop hook
+- **Token & Cost Tracking** — Input / output / cache read / cache creation tokens with per-model cost estimation
+- **Skill Analysis** — Invocation frequency of `/commit`, `/fixissue`, and other skills
+- **MCP Server Analysis** — Call counts by MCP server name and method
+- **Sub-agent Analysis** — Agent tool usage (Explore, Plan, etc.)
+- **Team Overview** — Per-user cost ranking, daily trends, model distribution
 
 
-## セットアップ
+## Setup
 
-### 1. プラグインのインストール
+### 1. Install the plugin
 
-対象プロジェクトにプラグインをインストールすると、Claude Code セッション終了時にダッシュボードへ利用データが自動送信されます。
+Installing the plugin on a project enables automatic data submission to the dashboard when a Claude Code session ends.
 
 ```bash
-# マーケットプレイス登録（ローカルマシンに登録されるだけで、外部に公開はされません）
+# Register the marketplace (only registered locally, not published externally)
 claude plugin marketplace add https://github.com/sec-dev-lab/ClaudeCodeDashboard.git
 
-# プラグインインストール（対象プロジェクトのみに適用）
+# Install the plugin (applies to the target project only)
 claude plugin install claude-code-usage-dashboard-plugin@sec-dev-lab --scope project
 ```
 
-### 2. 環境変数の設定
+### 2. Set environment variables
 
-対象プロジェクトルートの `.env` に、ダッシュボードの URL を追加します。
+Add the dashboard URL to `.env` in the target project root.
 
 ```bash
-# ローカル起動の場合（cd dashboard && npm run dev）
+# For local development (cd dashboard && npm run dev)
 CLAUDE_CODE_USAGE_DASHBOARD_URL=http://localhost:5173
 
-# デプロイ済みのダッシュボード
+# For a deployed dashboard
 CLAUDE_CODE_USAGE_DASHBOARD_URL=https://dashboard.your-account.workers.dev
 ```
 
-### アンインストール
+### Uninstall
 
 ```bash
-# プロジェクトから無効化
+# Disable for your local environment
 claude plugin disable claude-code-usage-dashboard-plugin --scope local
 
-# 削除
+# Remove from the project
 claude plugin uninstall claude-code-usage-dashboard-plugin --scope project
 ```
 
 
-## アーキテクチャ
+## Architecture
 
 ```
-Claude Code セッション終了
+Claude Code session ends
   │
   ▼
 Stop hook (session-uploader.py)
-  │  ~/.claude/projects/{hash}/{session_id}.jsonl をパース
-  │  トークン、スキル、MCP 呼び出し、サブエージェントイベントを抽出
+  │  Parses ~/.claude/projects/{hash}/{session_id}.jsonl
+  │  Extracts tokens, skills, MCP calls, sub-agent events
   │
   ▼
 POST /api/v1/usage/ingest
   │
   ▼
-Web アプリケーション (React Router v7 SSR)
+Web application (React Router v7 SSR)
   │
   ▼
-データベース (SQLite)
+Database (SQLite)
   │
   ▼
-ダッシュボード UI (Recharts)
+Dashboard UI (Recharts)
 ```
 
-## データ収集フック
+## Data Collection Hook
 
-Stop フック（`hooks/session-uploader.py`）は Claude Code セッション終了時に自動実行されます。
+The Stop hook (`hooks/session-uploader.py`) runs automatically when a Claude Code session ends.
 
-### 収集データ
+### Collected Data
 
-| データ | 説明 |
-|-------|------|
-| セッション情報 | session_id, プロジェクト, ブランチ, モデル, タイムスタンプ, 会話ターン数 |
-| トークン | input, output, cache_read, cache_creation |
-| スキルイベント | `/commit`, `/fixissue` 等（`<command-message>` タグから抽出） |
-| MCP イベント | サーバー名, メソッド名（例: `notion/notion-fetch`） |
-| サブエージェントイベント | エージェントタイプ（Explore, Plan 等） |
+| Data | Description |
+|------|-------------|
+| Session info | session_id, project, branch, model, timestamps, conversation turns |
+| Tokens | input, output, cache_read, cache_creation |
+| Skill events | `/commit`, `/fixissue`, etc. (extracted from `<command-message>` tags) |
+| MCP events | Server name, method name (e.g. `notion/notion-fetch`) |
+| Sub-agent events | Agent type (Explore, Plan, etc.) |
 
-> 推定コストは DB に保存せず、表示時にトークン数とモデルから料金テーブルを使って動的に計算します。
+> Estimated costs are not stored in the DB. They are calculated dynamically at display time using token counts, models, and a pricing table.
 
 
 
-## プロジェクト構成
+## Project Structure
 
 ```
 ClaudeCodeDashboard/
 ├── .claude-plugin/
-│   └── marketplace.json             # マーケットプレイス定義
-├── plugin/                          # プラグイン本体
+│   └── marketplace.json             # Marketplace definition
+├── plugin/                          # Plugin package
 │   ├── .claude-plugin/
-│   │   └── plugin.json              # プラグインメタデータ
+│   │   └── plugin.json              # Plugin metadata
 │   └── hooks/
-│       ├── hooks.json               # フック定義
-│       └── session-uploader.py      # Stop フック（トランスクリプト解析 + API 送信）
+│       ├── hooks.json               # Hook definition
+│       └── session-uploader.py      # Stop hook (transcript parsing + API submission)
 ├── dashboard/
 │   ├── app/
-│   │   ├── routes/              # ダッシュボードページ + Ingest API
-│   │   ├── components/          # チャート・UI コンポーネント
-│   │   └── lib/                 # 型定義, DB クエリ, コスト計算
-│   ├── migrations/              # D1 スキーマ
-│   └── workers/                 # Workers エントリポイント
+│   │   ├── routes/              # Dashboard pages + Ingest API
+│   │   ├── components/          # Chart & UI components
+│   │   └── lib/                 # Types, DB queries, cost calculation
+│   ├── migrations/              # D1 schema
+│   └── workers/                 # Workers entry point
 └── README.md
 ```
-

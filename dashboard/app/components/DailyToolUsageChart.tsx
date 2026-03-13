@@ -16,7 +16,7 @@ export function DailyToolUsageChart({ data }: { data: DailyToolUsageEntry[] }) {
     return (
       <ChartCard>
         <div className="flex items-center justify-center text-gray-400" style={{ height: CHART_HEIGHT }}>
-          データがありません
+          No data available
         </div>
       </ChartCard>
     );
@@ -52,7 +52,7 @@ function ChartCard({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-        日別ツール利用推移
+        Daily Tool Usage
       </h3>
       {children}
     </div>

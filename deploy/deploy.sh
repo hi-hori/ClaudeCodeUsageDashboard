@@ -6,7 +6,7 @@ WRANGLER_TOML="dashboard/wrangler.toml"
 usage() {
   echo "Usage: $0 <database_id>"
   echo ""
-  echo "D1 の database_id を設定し、ダッシュボードをデプロイします。"
+  echo "Set the D1 database_id and deploy the dashboard."
   echo ""
   echo "Example:"
   echo "  $0 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -20,16 +20,16 @@ fi
 DATABASE_ID="$1"
 
 if [[ ! -f "$WRANGLER_TOML" ]]; then
-  echo "Error: $WRANGLER_TOML が見つかりません。リポジトリルートから実行してください。" >&2
+  echo "Error: $WRANGLER_TOML not found. Run from the repository root." >&2
   exit 1
 fi
 
-echo "📝 database_id を設定中..."
+echo "Setting database_id..."
 sed -i '' "s|database_id = \".*\"|database_id = \"$DATABASE_ID\"|" "$WRANGLER_TOML"
-echo "✅ database_id を設定しました: $DATABASE_ID"
+echo "database_id set: $DATABASE_ID"
 
 echo ""
-echo "📦 デプロイ中..."
+echo "Deploying..."
 cd dashboard
 npm install
 npx wrangler d1 migrations apply claude-code-usage --remote

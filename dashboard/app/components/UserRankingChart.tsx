@@ -27,7 +27,7 @@ export function UserRankingChart({ data }: { data: UserRankingEntry[] }) {
   }
 
   return (
-    <ChartCard title="ユーザーランキング（コスト順）">
+    <ChartCard title="User Ranking (by Cost)">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         <BarChart data={chartData} layout="vertical" margin={CHART_MARGIN}>
           <CartesianGrid strokeDasharray="3 3" />
@@ -46,7 +46,7 @@ export function UserRankingChart({ data }: { data: UserRankingEntry[] }) {
             }}
           />
           <Tooltip
-            formatter={(value: number) => [`$${value.toFixed(2)}`, "コスト"]}
+            formatter={(value: number) => [`$${value.toFixed(2)}`, "Cost"]}
             contentStyle={{ backgroundColor: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", color: "var(--tooltip-text)" }}
             labelStyle={{ color: "var(--tooltip-text)" }}
           />
@@ -76,9 +76,9 @@ function ChartCard({
 
 function EmptyState() {
   return (
-    <ChartCard title="ユーザーランキング（コスト順）">
+    <ChartCard title="User Ranking (by Cost)">
       <div className="flex items-center justify-center text-gray-400" style={{ height: CHART_HEIGHT }}>
-        データがありません
+        No data available
       </div>
     </ChartCard>
   );

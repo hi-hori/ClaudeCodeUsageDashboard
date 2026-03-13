@@ -15,7 +15,7 @@ function formatDuration(seconds: number): string {
 
 function formatDate(isoString: string): string {
   const d = new Date(isoString);
-  return d.toLocaleDateString("ja-JP", {
+  return d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -32,9 +32,9 @@ export function RecentSessionsTable({
     return (
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-          最近のセッション
+          Recent Sessions
         </h3>
-        <div className="text-center text-gray-400 py-8">データがありません</div>
+        <div className="text-center text-gray-400 py-8">No data available</div>
       </div>
     );
   }
@@ -42,22 +42,22 @@ export function RecentSessionsTable({
   return (
     <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
       <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-        最近のセッション
+        Recent Sessions
       </h3>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-700">
               <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">User</th>
-              <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">モデル</th>
-              <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">日時</th>
-              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">時間</th>
-              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">ターン</th>
+              <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Model</th>
+              <th className="text-left py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Date</th>
+              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Duration</th>
+              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Turns</th>
               <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Skill</th>
               <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">MCP</th>
               <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">SubAg</th>
               <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Token</th>
-              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">コスト</th>
+              <th className="text-right py-2 px-2 text-gray-500 dark:text-gray-400 font-medium">Cost</th>
             </tr>
           </thead>
           <tbody>

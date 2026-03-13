@@ -63,7 +63,7 @@ export function DistributionPieChart({ title, data }: DistributionPieChartProps)
     return (
       <ChartCard title={title}>
         <div className="flex items-center justify-center text-gray-400" style={{ height: CHART_HEIGHT }}>
-          データがありません
+          No data available
         </div>
       </ChartCard>
     );
@@ -91,7 +91,7 @@ export function DistributionPieChart({ title, data }: DistributionPieChartProps)
             contentStyle={{ backgroundColor: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", color: "var(--tooltip-text)" }}
             labelStyle={{ color: "var(--tooltip-text)" }}
             itemStyle={{ color: "var(--tooltip-text)" }}
-            formatter={(value: number, name: string) => [`${value} 件`, name]}
+            formatter={(value: number, name: string) => [`${value}`, name]}
           />
           <Legend />
         </PieChart>
