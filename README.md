@@ -42,6 +42,18 @@ CLAUDE_CODE_USAGE_DASHBOARD_URL=http://localhost:5173
 CLAUDE_CODE_USAGE_DASHBOARD_URL=https://dashboard.your-account.workers.dev
 ```
 
+### Local testing
+
+To test with a local clone of this repository instead of the remote:
+
+```bash
+# Register from local path (run from the repository root)
+claude plugin marketplace add ./
+
+# Install the plugin
+claude plugin install claude-code-usage-dashboard-plugin@sec-dev-lab --scope project
+```
+
 ### Uninstall
 
 ```bash
