@@ -6,12 +6,14 @@ interface ModelPricing {
   cache_creation: number;
 }
 
+// Pricing is based on the pricing of Claude Code Pro
+// https://claude.com/pricing#api
 const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-opus-4-6": {
-    input: 15,
-    output: 75,
-    cache_read: 1.5,
-    cache_creation: 18.75,
+    input: 5,
+    output: 25,
+    cache_read: 0.5,
+    cache_creation: 6.25,
   },
   "claude-sonnet-4-6": {
     input: 3,
@@ -20,10 +22,10 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cache_creation: 3.75,
   },
   "claude-haiku-4-5": {
-    input: 0.8,
-    output: 4,
-    cache_read: 0.08,
-    cache_creation: 1.0,
+    input: 1,
+    output: 5,
+    cache_read: 0.1,
+    cache_creation: 1.25,
   },
 };
 

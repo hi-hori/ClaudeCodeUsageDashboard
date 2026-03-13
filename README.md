@@ -4,7 +4,7 @@ A self-hosted dashboard to visualize and share [Claude Code](https://docs.anthro
 
 A Stop hook automatically parses transcripts at session end, collecting token consumption, skill / MCP / sub-agent usage, and estimated costs into interactive charts.
 
-![Dashboard](docs/images/dashboard-screenshot.png)
+![Dashboard](images/dashboard-screenshot.png)
 
 ## Features
 
