@@ -1,6 +1,6 @@
 # Claude Code Usage Dashboard
 
-チームの [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 利用状況を可視化するセルフホスト型ダッシュボードです。
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) の利用状況をチームで可視化・共有できるセルフホスト型ダッシュボードです。
 
 セッション終了時に Stop フックがトランスクリプトを自動解析・保存し、トークン消費量、スキル・MCP・サブエージェントの利用状況、推定コストなどをチャートで表示します。
 

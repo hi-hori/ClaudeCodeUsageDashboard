@@ -1,6 +1,6 @@
 # Claude Code 利用状況ダッシュボード
 
-SecDev-Lab チームの Claude Code 活用状況を可視化するダッシュボードです。
+Claude Code の利用状況をチームで可視化・共有できるダッシュボードです。
 
 ## 概要
 
