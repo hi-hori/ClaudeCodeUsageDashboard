@@ -1,18 +1,5 @@
 {
-  "permissions": {
-    "allow": []
-  },
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/session-uploader.py"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": []
+  "enabledPlugins": {
+    "claude-code-usage-dashboard-plugin@sec-dev-lab": true
   }
 }

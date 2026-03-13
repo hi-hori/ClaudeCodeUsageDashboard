@@ -41,7 +41,7 @@ Web アプリケーション (React Router v7 SSR)
 
 ## データ収集フック
 
-Stop フック（`.claude/hooks/session-uploader.py`）は Claude Code セッション終了時に自動実行されます。
+Stop フック（`hooks/session-uploader.py`）は Claude Code セッション終了時に自動実行されます。
 
 ### 収集データ
 
@@ -57,38 +57,36 @@ Stop フック（`.claude/hooks/session-uploader.py`）は Claude Code セッシ
 
 ### セットアップ
 
-データを収集したい各プロジェクトで、以下の手順でフックを登録します。
-
-1. `session-uploader.py` を対象プロジェクトの `.claude/hooks/` にコピー:
+対象プロジェクトにプラグインをインストールします。
 
 ```bash
-mkdir -p <対象プロジェクト>/.claude/hooks
-cp .claude/hooks/session-uploader.py <対象プロジェクト>/.claude/hooks/
+# 1. マーケットプレイス登録（ローカルマシンに登録されるだけで、外部に公開はされません）
+claude plugin marketplace add https://github.com/sec-dev-lab/ClaudeCodeDashboard.git
+
+# 2. プラグインインストール（対象プロジェクトのみに適用）
+claude plugin install claude-code-usage-dashboard-plugin@sec-dev-lab --scope project
+
+# 3. 環境変数設定（対象プロジェクトルートの .env に追加）
+CLAUDE_CODE_USAGE_DASHBOARD_URL=https://your-dashboard.example.com
+# Cloudflare Access 経由の場合（本番のみ）
+CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_ID=your-client-id
+CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_SECRET=your-client-secret
 ```
 
-2. 対象プロジェクトの `.claude/settings.json` に Stop フックを登録:
+### ローカルテスト
 
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 $CLAUDE_PROJECT_DIR/.claude/hooks/session-uploader.py"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-3. 対象プロジェクトの `.env` にダッシュボードの送信先URLを設定:
+ローカルパスからテストできます。
 
 ```bash
-CLAUDE_CODE_USAGE_DASHBOARD_URL=http://localhost:5173
+# ClaudeCodeDashboard リポジトリのルートで実行
+claude plugin marketplace add ./
+claude plugin install claude-code-usage-dashboard-plugin@sec-dev-lab --scope project
+```
+
+### アンインストール
+
+```bash
+/plugin uninstall claude-code-usage-dashboard-plugin
 ```
 
 
@@ -96,8 +94,14 @@ CLAUDE_CODE_USAGE_DASHBOARD_URL=http://localhost:5173
 
 ```
 ClaudeCodeDashboard/
-├── .claude/hooks/
-│   └── session-uploader.py      # Stop フック（トランスクリプト解析 + API 送信）
+├── .claude-plugin/
+│   └── marketplace.json             # マーケットプレイス定義
+├── claude-code-usage-dashboard/     # プラグイン本体
+│   ├── .claude-plugin/
+│   │   └── plugin.json              # プラグインメタデータ
+│   └── hooks/
+│       ├── hooks.json               # フック定義
+│       └── session-uploader.py      # Stop フック（トランスクリプト解析 + API 送信）
 ├── dashboard/
 │   ├── app/
 │   │   ├── routes/              # ダッシュボードページ + Ingest API

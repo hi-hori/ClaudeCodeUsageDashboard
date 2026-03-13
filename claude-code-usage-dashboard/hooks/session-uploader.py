@@ -56,7 +56,7 @@ def main() -> None:
     if not email:
         return
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     load_dotenv(os.path.join(project_dir, ".env"))
 
     dashboard_url = os.environ.get(
