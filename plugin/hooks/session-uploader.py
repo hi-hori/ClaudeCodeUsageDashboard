@@ -130,8 +130,8 @@ def read_jsonl(path):
 def extract_user_skill_events(records):
     """Extract skill events from user messages containing <command-message> tags.
 
-    When users invoke skills via /fixissue, /commit etc., Claude Code records
-    them as user messages with <command-message>fixissue</command-message> tags.
+    When users invoke slash commands like /commit, Claude Code records
+    them as user messages with <command-message>commit</command-message> tags.
     """
     command_msg_re = re.compile(r"<command-message>([^<]+)</command-message>")
     skill_events = []

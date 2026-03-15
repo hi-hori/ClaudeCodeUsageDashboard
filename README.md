@@ -10,7 +10,7 @@ A Stop hook automatically parses transcripts at session end, collecting token co
 
 - **Data Collection** — Zero-config data collection via Stop hook
 - **Token & Cost Tracking** — Input / output / cache read / cache creation tokens with per-model cost estimation
-- **Skill Analysis** — Invocation frequency of `/commit`, `/fixissue`, and other skills
+- **Skill Analysis** — Invocation frequency of `/commit` and other slash commands
 - **MCP Server Analysis** — Call counts by MCP server name and method
 - **Sub-agent Analysis** — Agent tool usage (Explore, Plan, etc.)
 - **Team Overview** — Per-user cost ranking, daily trends, model distribution
@@ -115,7 +115,7 @@ The Stop hook (`hooks/session-uploader.py`) runs automatically when a Claude Cod
 |------|-------------|
 | Session info | session_id, project, branch, model, timestamps, conversation turns |
 | Tokens | input, output, cache_read, cache_creation |
-| Skill events | `/commit`, `/fixissue`, etc. (extracted from `<command-message>` tags) |
+| Skill events | `/commit` etc. (extracted from `<command-message>` tags) |
 | MCP events | Server name, method name (e.g. `notion/notion-fetch`) |
 | Sub-agent events | Agent type (Explore, Plan, etc.) |
 
