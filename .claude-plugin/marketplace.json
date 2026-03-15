@@ -3,7 +3,7 @@
   "name": "SecDevLab",
   "owner": { "name": "SecDevLab Inc." },
   "metadata": {
-    "description": "Claude Code usage dashboard plugin for tracking session analytics"
+    "description": "Claude Code Usage Dashboard plugin for tracking session analytics"
   },
   "plugins": [
     {
