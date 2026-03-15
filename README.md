@@ -155,26 +155,3 @@ Verify Claude Code is authenticated (email is used for user identification):
 ```bash
 claude auth status
 ```
-
-
-## Project Structure
-
-```
-ClaudeCodeDashboard/
-├── .claude-plugin/
-│   └── marketplace.json             # Marketplace definition
-├── plugin/                          # Plugin package
-│   ├── .claude-plugin/
-│   │   └── plugin.json              # Plugin metadata
-│   └── hooks/
-│       ├── hooks.json               # Hook definition
-│       └── session-uploader.py      # Stop hook (transcript parsing + API submission)
-├── dashboard/
-│   ├── app/
-│   │   ├── routes/              # Dashboard pages + Ingest API
-│   │   ├── components/          # Chart & UI components
-│   │   └── lib/                 # Types, DB queries, cost calculation
-│   ├── migrations/              # D1 schema
-│   └── workers/                 # Workers entry point
-└── README.md
-```
