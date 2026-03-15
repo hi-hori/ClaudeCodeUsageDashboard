@@ -40,7 +40,9 @@ The Workers URL will be displayed after deployment (e.g. `https://claude-code-us
 
 Subsequent deployments can use the same command.
 
-## Zero Trust Setup (Authentication — one-time manual setup)
+## Zero Trust Setup (Optional — one-time manual setup)
+
+> This section is optional and provided as a reference. The dashboard works without Zero Trust. Configure it only if you need access control in your environment.
 
 Configure access control with Cloudflare Zero Trust.
 A single Access Application handles two types of authentication: dashboard access (browser) and Ingest API (Stop hook).
