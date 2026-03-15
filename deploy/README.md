@@ -117,7 +117,7 @@ CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_SECRET="<Client Secret>"
 When new migration SQL files are added to `migrations/`:
 
 ```bash
-wrangler d1 migrations apply claude-code-usage --remote
+wrangler d1 migrations apply claude-code-usage-dashboard --remote
 ```
 
 > For local environments, use the `--local` flag.
@@ -132,8 +132,8 @@ Use this to reset the DB to a clean state, e.g. after breaking schema changes.
 cd dashboard
 
 # 1. Drop all tables and migration history
-wrangler d1 execute claude-code-usage --remote --command "DROP TABLE IF EXISTS subagent_usage_events; DROP TABLE IF EXISTS mcp_usage_events; DROP TABLE IF EXISTS skill_usage_events; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
+wrangler d1 execute claude-code-usage-dashboard --remote --command "DROP TABLE IF EXISTS subagent_usage_events; DROP TABLE IF EXISTS mcp_usage_events; DROP TABLE IF EXISTS skill_usage_events; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
 
 # 2. Re-apply migrations
-wrangler d1 migrations apply claude-code-usage --remote
+wrangler d1 migrations apply claude-code-usage-dashboard --remote
 ```
