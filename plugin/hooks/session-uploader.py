@@ -11,6 +11,7 @@ Author: SecDevLab Inc.
 License: MIT
 """
 
+import fnmatch
 import json
 import os
 import re
@@ -59,8 +60,12 @@ def main() -> None:
     if not email:
         return
 
+    config_path = Path.home() / ".claude-code-usage-dashboard" / "env"
+    load_dotenv(str(config_path))
+
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-    load_dotenv(os.path.join(project_dir, ".env"))
+    if not is_allowed_dir(project_dir):
+        return
 
     dashboard_url = os.environ.get(
         "CLAUDE_CODE_USAGE_DASHBOARD_URL", "http://localhost:5173"
@@ -112,6 +117,15 @@ def load_dotenv(path: str) -> None:
                 os.environ.setdefault(key.strip(), value)
     except FileNotFoundError:
         pass
+
+
+def is_allowed_dir(project_dir: str) -> bool:
+    raw = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_ALLOWED_DIRS", "")
+    if not raw.strip():
+        return True
+    patterns = [p.strip() for p in raw.split(",") if p.strip()]
+    project_dir = project_dir.rstrip("/")
+    return any(fnmatch.fnmatch(project_dir, pat.rstrip("/")) for pat in patterns)
 
 
 def read_jsonl(path):

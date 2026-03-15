@@ -20,19 +20,26 @@ A Stop hook automatically parses transcripts at session end, collecting token co
 
 ### 1. Install the plugin
 
-Installing the plugin on a project enables automatic data submission to the dashboard when a Claude Code session ends.
+Installing the plugin enables automatic data submission to the dashboard when a Claude Code session ends.
 
 ```bash
 # Register the marketplace (only registered locally, not published externally)
 claude plugin marketplace add https://github.com/AgenticSec/ClaudeCodeUsageDashboard.git
 
-# Install the plugin (applies to the target project only)
-claude plugin install claude-code-usage-dashboard-plugin@SecDevLab --scope project
+# Install the plugin (applies to all projects)
+claude plugin install claude-code-usage-dashboard-plugin@SecDevLab
 ```
 
 ### 2. Set environment variables
 
-Add the dashboard URL to `.env` in the target project root.
+Create `~/.claude-code-usage-dashboard/env` with your dashboard URL. This config is shared across all projects.
+
+```bash
+mkdir -p ~/.claude-code-usage-dashboard
+cp .env.example ~/.claude-code-usage-dashboard/env
+```
+
+Then edit `~/.claude-code-usage-dashboard/env`:
 
 ```bash
 # For local development (cd dashboard && npm run dev)
@@ -40,6 +47,10 @@ CLAUDE_CODE_USAGE_DASHBOARD_URL=http://localhost:5173
 
 # For a deployed dashboard
 CLAUDE_CODE_USAGE_DASHBOARD_URL=https://dashboard.your-account.workers.dev
+
+# Optional: restrict to specific directories (fnmatch patterns, comma-separated)
+# If unset, all projects are allowed.
+CLAUDE_CODE_USAGE_DASHBOARD_ALLOWED_DIRS=/Users/me/work/*,/Users/me/oss/*
 ```
 
 ### 3. Start the dashboard
@@ -68,17 +79,13 @@ To test with a local clone of this repository instead of the remote:
 claude plugin marketplace add ./
 
 # Install the plugin
-claude plugin install claude-code-usage-dashboard-plugin@SecDevLab --scope project
+claude plugin install claude-code-usage-dashboard-plugin@SecDevLab
 ```
 
 ### Uninstall
 
 ```bash
-# Disable for your local environment
-claude plugin disable claude-code-usage-dashboard-plugin --scope local
-
-# Remove from the project
-claude plugin uninstall claude-code-usage-dashboard-plugin --scope project
+claude plugin uninstall claude-code-usage-dashboard-plugin
 ```
 
 
