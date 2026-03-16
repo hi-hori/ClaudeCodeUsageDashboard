@@ -53,7 +53,23 @@ CLAUDE_CODE_USAGE_DASHBOARD_URL=https://dashboard.your-account.workers.dev
 CLAUDE_CODE_USAGE_DASHBOARD_ALLOWED_DIRS=/Users/me/work/*,/Users/me/oss/*
 ```
 
-### 3. Start the dashboard
+### Verify setup
+
+You can verify the setup completed successfully:
+
+- **Plugin**: `claude plugin list` includes `claude-code-usage-dashboard-plugin`
+- **Environment**: `~/.claude-code-usage-dashboard/env` exists and `CLAUDE_CODE_USAGE_DASHBOARD_URL` is set
+- **Auth**: `claude auth status` shows your email (used for user identification)
+
+**In-session check**: Run `/claude-code-usage-dashboard:status` in any Claude Code session to see whether the dashboard is enabled for the current process. This reports plugin status, config, auth, and whether the project directory is allowed.
+
+### Uninstall
+
+```bash
+claude plugin uninstall claude-code-usage-dashboard-plugin
+```
+
+## Running the dashboard locally
 
 Prerequisites: Node.js 18+, Wrangler CLI (`npm install -g wrangler`)
 
@@ -81,13 +97,6 @@ claude plugin marketplace add ./
 # Install the plugin
 claude plugin install claude-code-usage-dashboard-plugin@SecDevLab
 ```
-
-### Uninstall
-
-```bash
-claude plugin uninstall claude-code-usage-dashboard-plugin
-```
-
 
 ## Architecture
 
