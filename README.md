@@ -61,6 +61,8 @@ You can verify the setup completed successfully:
 - **Environment**: `~/.claude-code-usage-dashboard/env` exists and `CLAUDE_CODE_USAGE_DASHBOARD_URL` is set
 - **Auth**: `claude auth status` shows your email (used for user identification)
 
+**In-session check**: Run `/claude-code-usage-dashboard:status` in any Claude Code session to see whether the dashboard is enabled for the current process. This reports plugin status, config, auth, and whether the project directory is allowed.
+
 ### Uninstall
 
 ```bash

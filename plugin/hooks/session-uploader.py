@@ -46,7 +46,73 @@ BUILTIN_COMMANDS = frozenset(
 )
 
 
+def run_status_check() -> None:
+    """Print status of dashboard configuration for the current process."""
+    config_path = Path.home() / ".claude-code-usage-dashboard" / "env"
+    load_dotenv(str(config_path))
+
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    dashboard_url = os.environ.get(
+        "CLAUDE_CODE_USAGE_DASHBOARD_URL", "http://localhost:5173"
+    )
+    allowed_dirs = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_ALLOWED_DIRS", "")
+
+    lines = ["Claude Code Usage Dashboard — Status", "=" * 40, ""]
+
+    # Plugin loaded (we're running, so it is)
+    lines.append("✓ Plugin loaded (this session)")
+
+    # Config file
+    if config_path.exists():
+        lines.append(f"✓ Config file: {config_path}")
+    else:
+        lines.append(f"✗ Config file missing: {config_path}")
+
+    # Dashboard URL
+    if dashboard_url:
+        lines.append(f"✓ Dashboard URL: {dashboard_url}")
+    else:
+        lines.append("✗ CLAUDE_CODE_USAGE_DASHBOARD_URL not set")
+
+    # Auth
+    email = get_email()
+    if email:
+        lines.append(f"✓ Authenticated: {email}")
+    else:
+        lines.append("✗ Not authenticated (run: claude auth status)")
+
+    # Project dir allowed
+    if is_allowed_dir(project_dir):
+        lines.append(f"✓ Project dir allowed: {project_dir}")
+    else:
+        lines.append(
+            f"✗ Project dir not in ALLOWED_DIRS: {project_dir}"
+        )
+        if allowed_dirs:
+            lines.append(f"  Allowed: {allowed_dirs}")
+
+    lines.append("")
+    enabled = all(
+        [
+            config_path.exists(),
+            bool(dashboard_url),
+            bool(email),
+            is_allowed_dir(project_dir),
+        ]
+    )
+    if enabled:
+        lines.append("→ Usage data will be sent to the dashboard when this session ends.")
+    else:
+        lines.append("→ Fix the issues above for usage data to be collected.")
+
+    print("\n".join(lines))
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "--status":
+        run_status_check()
+        return
+
     session_info = json.loads(sys.stdin.read())
     session_id = session_info.get("session_id")
     if not session_id:
