@@ -42,9 +42,9 @@ export async function upsertSessionAndEvents(
 
   const statements: D1PreparedStatement[] = [];
 
-  // Stop hook fires after every agent turn, so each call carries the full
-  // cumulative transcript. Upsert + DELETE-then-INSERT keeps the row in sync
-  // with the latest snapshot instead of dropping subsequent turns.
+  // SessionEnd hook delivers a single cumulative snapshot per session and may
+  // re-fire on retries. Upsert + DELETE-then-INSERT keeps the row idempotent
+  // on duplicate uploads.
   statements.push(
     db
       .prepare(
