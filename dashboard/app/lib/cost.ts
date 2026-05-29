@@ -9,6 +9,18 @@ interface ModelPricing {
 // Pricing is based on the pricing of Claude Code Pro
 // https://claude.com/pricing#api
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  "claude-opus-4-8": {
+    input: 5,
+    output: 25,
+    cache_read: 0.5,
+    cache_creation: 6.25,
+  },
+  "claude-opus-4-7": {
+    input: 5,
+    output: 25,
+    cache_read: 0.5,
+    cache_creation: 6.25,
+  },
   "claude-opus-4-6": {
     input: 5,
     output: 25,
