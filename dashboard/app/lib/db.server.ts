@@ -509,30 +509,75 @@ export async function getDashboardData(
   // back to one entry per real session id: SUM the additive metrics, take the
   // widest span (MIN first / MAX last) and the latest metadata. duration_seconds
   // is a per-row generated column over the full span, so MAX gives the session
-  // duration.
-  type RecentSessionRow = Omit<RecentSessionEntry, "estimated_cost_usd">;
+  // duration. A window function flags each session's most recent day-row so we
+  // can also expose that day's portion (latest_* columns) alongside the totals.
+  type RecentSessionRow = Omit<
+    RecentSessionEntry,
+    "estimated_cost_usd" | "latest_total_tokens" | "latest_estimated_cost_usd"
+  > & {
+    latest_input_tokens: number;
+    latest_output_tokens: number;
+    latest_cache_read_tokens: number;
+    latest_cache_creation_tokens: number;
+  };
+  const rid = REAL_SESSION_ID("s.session_id");
+  const sday = SESSION_DAY("s.session_id", "s.first_event_at");
   const recentSessionsRaw = await db.prepare(
     `SELECT
-      ${REAL_SESSION_ID("s.session_id")} as session_id,
-      MAX(s.user_id) as user_id, MAX(u.email) as email,
-      ${REPO_NAME_FROM("MAX(s.project_dir)")} as repo_name,
-      MAX(s.model) as model, MAX(s.duration_seconds) as duration_seconds,
-      SUM(s.conversation_turns) as conversation_turns, SUM(s.skill_call_count) as skill_call_count,
-      SUM(s.mcp_call_count) as mcp_call_count, SUM(s.subagent_call_count) as subagent_call_count,
-      SUM(s.input_tokens) as input_tokens, SUM(s.output_tokens) as output_tokens,
-      SUM(s.cache_read_tokens) as cache_read_tokens, SUM(s.cache_creation_tokens) as cache_creation_tokens,
-      MAX(s.last_event_at) as last_event_at
-    FROM sessions s JOIN users u ON s.user_id = u.id
-    ${sfJoin.where}
-    GROUP BY ${REAL_SESSION_ID("s.session_id")}
+      rid as session_id,
+      MAX(user_id) as user_id, MAX(email) as email,
+      ${REPO_NAME_FROM("MAX(project_dir)")} as repo_name,
+      MAX(model) as model, MAX(duration_seconds) as duration_seconds,
+      SUM(conversation_turns) as conversation_turns, SUM(skill_call_count) as skill_call_count,
+      SUM(mcp_call_count) as mcp_call_count, SUM(subagent_call_count) as subagent_call_count,
+      SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+      SUM(cache_read_tokens) as cache_read_tokens, SUM(cache_creation_tokens) as cache_creation_tokens,
+      MAX(last_event_at) as last_event_at,
+      SUM(CASE WHEN is_latest = 1 THEN conversation_turns ELSE 0 END) as latest_conversation_turns,
+      SUM(CASE WHEN is_latest = 1 THEN skill_call_count ELSE 0 END) as latest_skill_call_count,
+      SUM(CASE WHEN is_latest = 1 THEN mcp_call_count ELSE 0 END) as latest_mcp_call_count,
+      SUM(CASE WHEN is_latest = 1 THEN subagent_call_count ELSE 0 END) as latest_subagent_call_count,
+      SUM(CASE WHEN is_latest = 1 THEN input_tokens ELSE 0 END) as latest_input_tokens,
+      SUM(CASE WHEN is_latest = 1 THEN output_tokens ELSE 0 END) as latest_output_tokens,
+      SUM(CASE WHEN is_latest = 1 THEN cache_read_tokens ELSE 0 END) as latest_cache_read_tokens,
+      SUM(CASE WHEN is_latest = 1 THEN cache_creation_tokens ELSE 0 END) as latest_cache_creation_tokens
+    FROM (
+      SELECT
+        ${rid} as rid,
+        s.user_id, u.email, s.project_dir, s.model, s.duration_seconds,
+        s.conversation_turns, s.skill_call_count, s.mcp_call_count, s.subagent_call_count,
+        s.input_tokens, s.output_tokens, s.cache_read_tokens, s.cache_creation_tokens, s.last_event_at,
+        CASE WHEN ${sday} = MAX(${sday}) OVER (PARTITION BY ${rid}) THEN 1 ELSE 0 END as is_latest
+      FROM sessions s JOIN users u ON s.user_id = u.id
+      ${sfJoin.where}
+    )
+    GROUP BY rid
     ORDER BY last_event_at DESC
     LIMIT 20`
   ).bind(...sfJoin.params).all<RecentSessionRow>();
 
-  const recentSessions: RecentSessionEntry[] = recentSessionsRaw.results.map((r) => ({
-    ...r,
-    estimated_cost_usd: calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens),
-  }));
+  const recentSessions: RecentSessionEntry[] = recentSessionsRaw.results.map((r) => {
+    const {
+      latest_input_tokens,
+      latest_output_tokens,
+      latest_cache_read_tokens,
+      latest_cache_creation_tokens,
+      ...rest
+    } = r;
+    return {
+      ...rest,
+      estimated_cost_usd: calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens),
+      latest_total_tokens:
+        latest_input_tokens + latest_output_tokens + latest_cache_read_tokens + latest_cache_creation_tokens,
+      latest_estimated_cost_usd: calculateEstimatedCost(
+        r.model,
+        latest_input_tokens,
+        latest_output_tokens,
+        latest_cache_read_tokens,
+        latest_cache_creation_tokens
+      ),
+    };
+  });
 
   // Users list (date-filtered only, no user/repo filter so the selector always shows all users)
   const dateOnlyFilter = buildSessionFilter(hasDateFilter, dateFilter, undefined, undefined);

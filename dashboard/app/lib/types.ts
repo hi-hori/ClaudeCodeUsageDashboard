@@ -107,6 +107,16 @@ export interface RecentSessionEntry {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   estimated_cost_usd: number;
+  // Portion consumed on the session's most recent activity day (the day shown
+  // in last_event_at). Equals the totals for a single-day session. Duration has
+  // no per-day breakdown (day-rows store the session-wide span), so it is not
+  // split here.
+  latest_conversation_turns: number;
+  latest_skill_call_count: number;
+  latest_mcp_call_count: number;
+  latest_subagent_call_count: number;
+  latest_total_tokens: number;
+  latest_estimated_cost_usd: number;
   last_event_at: string;
 }
 
