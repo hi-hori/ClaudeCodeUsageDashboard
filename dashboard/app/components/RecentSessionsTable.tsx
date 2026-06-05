@@ -24,6 +24,34 @@ function formatDate(isoString: string): string {
   });
 }
 
+// Render a metric's running total with the most recent day's portion stacked
+// below as "+x". The total stays on its own right-aligned line (with tabular
+// figures) so the primary numbers line up cleanly down the column; the delta
+// hangs underneath in a smaller, dimmed line. The delta is shown only when
+// earlier days also contributed to that metric (latest is non-zero and smaller
+// than the total); single-day sessions show just the total.
+function ValueWithDelta({
+  total,
+  latest,
+  format = String,
+}: {
+  total: number;
+  latest: number;
+  format?: (n: number) => string;
+}) {
+  const showDelta = latest > 0 && latest < total;
+  return (
+    <div className="flex flex-col items-end leading-tight tabular-nums">
+      <span>{format(total)}</span>
+      {showDelta && (
+        <span className="text-xs font-normal text-gray-400 dark:text-gray-500">
+          +{format(latest)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function RecentSessionsTable({
   sessions,
 }: {
@@ -77,12 +105,13 @@ export function RecentSessionsTable({
                 s.output_tokens +
                 s.cache_read_tokens +
                 s.cache_creation_tokens;
+              const formatCost = (n: number) => `$${n.toFixed(2)}`;
               return (
                 <tr
                   key={s.session_id}
                   className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50"
                 >
-                  <td className="py-2 px-2">
+                  <td className="py-2 px-2 align-top">
                     <button
                       onClick={() => setFilter("user_id", String(s.user_id))}
                       className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
@@ -90,7 +119,7 @@ export function RecentSessionsTable({
                       {s.email.split("@")[0]}
                     </button>
                   </td>
-                  <td className="py-2 px-2">
+                  <td className="py-2 px-2 align-top">
                     <button
                       onClick={() => setFilter("repo", s.repo_name)}
                       className="text-green-600 dark:text-green-400 hover:underline cursor-pointer text-xs"
@@ -98,34 +127,34 @@ export function RecentSessionsTable({
                       {s.repo_name}
                     </button>
                   </td>
-                  <td className="py-2 px-2 text-gray-600 dark:text-gray-400">
+                  <td className="py-2 px-2 align-top text-gray-600 dark:text-gray-400">
                     <span className="inline-block bg-gray-100 dark:bg-gray-800 rounded px-1.5 py-0.5 text-xs">
                       {s.model.replace("claude-", "")}
                     </span>
                   </td>
-                  <td className="py-2 px-2 text-gray-600 dark:text-gray-400">
+                  <td className="py-2 px-2 align-top text-gray-600 dark:text-gray-400 whitespace-nowrap">
                     {formatDate(s.last_event_at)}
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">
+                  <td className="py-2 px-2 align-top text-right text-gray-600 dark:text-gray-400 tabular-nums">
                     {formatDuration(s.duration_seconds)}
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">
-                    {s.conversation_turns}
+                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
+                    <ValueWithDelta total={s.conversation_turns} latest={s.latest_conversation_turns} />
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">
-                    {s.skill_call_count}
+                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
+                    <ValueWithDelta total={s.skill_call_count} latest={s.latest_skill_call_count} />
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">
-                    {s.mcp_call_count}
+                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
+                    <ValueWithDelta total={s.mcp_call_count} latest={s.latest_mcp_call_count} />
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-900 dark:text-gray-100">
-                    {s.subagent_call_count}
+                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
+                    <ValueWithDelta total={s.subagent_call_count} latest={s.latest_subagent_call_count} />
                   </td>
-                  <td className="py-2 px-2 text-right text-gray-600 dark:text-gray-400">
-                    {formatTokens(totalTokens)}
+                  <td className="py-2 px-2 align-top text-right text-gray-600 dark:text-gray-400">
+                    <ValueWithDelta total={totalTokens} latest={s.latest_total_tokens} format={formatTokens} />
                   </td>
-                  <td className="py-2 px-2 text-right font-medium text-gray-900 dark:text-gray-100">
-                    ${s.estimated_cost_usd.toFixed(2)}
+                  <td className="py-2 px-2 align-top text-right font-medium text-gray-900 dark:text-gray-100">
+                    <ValueWithDelta total={s.estimated_cost_usd} latest={s.latest_estimated_cost_usd} format={formatCost} />
                   </td>
                 </tr>
               );
