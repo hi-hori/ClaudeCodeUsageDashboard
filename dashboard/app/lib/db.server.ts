@@ -250,7 +250,12 @@ function buildSessionFilter(
   const conditions: string[] = [];
   const params: unknown[] = [];
   if (hasDateFilter) {
-    conditions.push(`${p}first_event_at >= datetime('now', ?)`);
+    // Filter on last_event_at, not first_event_at. Every day-row widens
+    // last_event_at to the session's final activity (MAX), so a session that
+    // started before the window but ran into it stays visible; one whose last
+    // activity predates the window drops out. first_event_at is widened to the
+    // session start (MIN) and would wrongly exclude such long-running sessions.
+    conditions.push(`${p}last_event_at >= datetime('now', ?)`);
     params.push(dateFilter);
   }
   if (userId !== undefined) {
