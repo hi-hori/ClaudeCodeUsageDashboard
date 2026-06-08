@@ -515,6 +515,33 @@ export async function getDashboardData(
   // widest span (MIN first / MAX last) and the latest metadata. duration_seconds
   // is a per-row generated column over the full span, so MAX gives the session
   // duration.
+  //
+  // Unlike the windowed KPI/Trend aggregates, a session that ran into the
+  // window shows its FULL totals here, not just the in-window portion: each row
+  // in this list represents a whole session, so a partial token count would be
+  // misleading. We qualify a session by ANY of its day-rows touching the window
+  // (EXISTS), then SUM across ALL of its rows. The user/repo filter applies to
+  // the summed rows directly — those columns are constant across a session's
+  // day-rows, so they keep every row of a qualifying session.
+  const recentConditions: string[] = [];
+  const recentParams: unknown[] = [];
+  if (userId !== undefined) {
+    recentConditions.push(`s.user_id = ?`);
+    recentParams.push(userId);
+  }
+  if (repo) {
+    recentConditions.push(`REPLACE(s.project_dir, '\\', '/') LIKE '%/' || ?`);
+    recentParams.push(repo);
+  }
+  if (hasDateFilter) {
+    recentConditions.push(
+      `EXISTS (SELECT 1 FROM sessions _w
+        WHERE ${REAL_SESSION_ID("_w.session_id")} = ${REAL_SESSION_ID("s.session_id")}
+        AND _w.last_event_at >= datetime('now', ?))`
+    );
+    recentParams.push(dateFilter);
+  }
+  const recentWhere = recentConditions.length > 0 ? `WHERE ${recentConditions.join(" AND ")}` : "";
   type RecentSessionRow = Omit<RecentSessionEntry, "estimated_cost_usd">;
   const recentSessionsRaw = await db.prepare(
     `SELECT
@@ -528,11 +555,11 @@ export async function getDashboardData(
       SUM(s.cache_read_tokens) as cache_read_tokens, SUM(s.cache_creation_tokens) as cache_creation_tokens,
       MAX(s.last_event_at) as last_event_at
     FROM sessions s JOIN users u ON s.user_id = u.id
-    ${sfJoin.where}
+    ${recentWhere}
     GROUP BY ${REAL_SESSION_ID("s.session_id")}
     ORDER BY last_event_at DESC
     LIMIT 20`
-  ).bind(...sfJoin.params).all<RecentSessionRow>();
+  ).bind(...recentParams).all<RecentSessionRow>();
 
   const recentSessions: RecentSessionEntry[] = recentSessionsRaw.results.map((r) => ({
     ...r,
