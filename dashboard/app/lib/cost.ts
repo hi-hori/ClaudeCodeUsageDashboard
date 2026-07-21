@@ -33,6 +33,12 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cache_read: 0.5,
     cache_creation: 6.25,
   },
+  "claude-sonnet-5": {
+    input: 3,
+    output: 15,
+    cache_read: 0.3,
+    cache_creation: 3.75,
+  },
   "claude-sonnet-4-6": {
     input: 3,
     output: 15,
