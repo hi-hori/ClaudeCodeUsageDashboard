@@ -122,6 +122,8 @@ When new migration SQL files are added to `migrations/`:
 wrangler d1 migrations apply claude-code-usage-dashboard --remote
 ```
 
+> Migration `0002_rollup_schema.sql` rebuilds the schema to reduce D1 `rows_read` and **drops all existing data**. Deployments created before it will start with an empty dashboard after applying it.
+
 > For local environments, use the `--local` flag.
 
 ## DB Reset (Delete all data + recreate schema)
@@ -134,7 +136,7 @@ Use this to reset the DB to a clean state, e.g. after breaking schema changes.
 cd dashboard
 
 # 1. Drop all tables and migration history
-wrangler d1 execute claude-code-usage-dashboard --remote --command "DROP TABLE IF EXISTS subagent_usage_events; DROP TABLE IF EXISTS mcp_usage_events; DROP TABLE IF EXISTS skill_usage_events; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
+wrangler d1 execute claude-code-usage-dashboard --remote --command "DROP TABLE IF EXISTS session_tool_counts; DROP TABLE IF EXISTS tool_usage_daily; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
 
 # 2. Re-apply migrations
 wrangler d1 migrations apply claude-code-usage-dashboard --remote

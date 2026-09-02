@@ -12,6 +12,29 @@ import type {
 } from "./types";
 import { calculateEstimatedCost } from "./cost";
 
+// D1 bills by rows_read (rows scanned, index rows included), so every query
+// here is written to touch only the rows it needs: window filters hit an index
+// on `day`, per-session reads use the (session_id, day) primary key, and tool
+// events are stored pre-aggregated per day instead of as raw rows.
+
+type ToolKind = "skill" | "mcp" | "subagent";
+const UNSPECIFIED_SUBAGENT = "(unspecified)";
+const RECENT_SESSIONS_LIMIT = 20;
+const USER_RANKING_LIMIT = 10;
+
+/** Last path segment of a project directory. Windows backslashes are
+ *  normalized so "D:\\Work\\repo" and "/home/me/repo" both yield "repo". */
+export function repoNameFromProjectDir(projectDir: string): string {
+  const norm = projectDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const seg = norm.slice(norm.lastIndexOf("/") + 1);
+  return seg || projectDir;
+}
+
+/** YYYY-MM-DD (UTC) of an ISO timestamp; `fallback` when it is malformed. */
+function dayOf(ts: string | undefined, fallback: string): string {
+  return ts && /^\d{4}-\d{2}-\d{2}/.test(ts) ? ts.slice(0, 10) : fallback;
+}
+
 export async function upsertUser(
   db: D1Database,
   email: string
@@ -29,6 +52,21 @@ export async function upsertUser(
   return row!.id;
 }
 
+type SessionTotalsRow = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  skill_call_count: number;
+  mcp_call_count: number;
+  subagent_call_count: number;
+  conversation_turns: number;
+};
+
+type ToolCountRow = { day: string; kind: ToolKind; name: string; call_count: number };
+
+const toolKey = (day: string, kind: string, name: string) => `${day}\u0000${kind}\u0000${name}`;
+
 export async function upsertSessionAndEvents(
   db: D1Database,
   userId: number,
@@ -40,74 +78,63 @@ export async function upsertSessionAndEvents(
 }> {
   const { session, skill_events, mcp_events, subagent_events } = payload;
 
-  // One row per (session, day). The PK encodes the activity day so a session
-  // continuing into a new day gets a fresh row instead of inflating the start
-  // day. The hook re-uploads the cumulative snapshot, so we credit only the
-  // increment since everything stored so far for this session — summed across
-  // its existing rows (legacy plain-id row, if any, included) — to the day's
-  // row. Event tables keep the REAL session id; only the sessions PK is keyed
-  // by day.
-  const realId = session.session_id;
+  // One sessions row per (session, day). The hook re-uploads the cumulative
+  // snapshot, so we credit only the increment since everything stored so far
+  // for this session to the current day's row. Both "previous" reads are
+  // primary-key-prefix lookups on session_id.
+  const sessionId = session.session_id;
   const day = session.last_event_at.slice(0, 10);
-  const dayKey = `${realId}${SESSION_DAY_DELIM}${day}`;
+  const repoName = repoNameFromProjectDir(session.project_dir);
 
-  const prev = await db
-    .prepare(
-      `SELECT
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-        COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
-        COALESCE(SUM(skill_call_count), 0) AS skill_call_count,
-        COALESCE(SUM(mcp_call_count), 0) AS mcp_call_count,
-        COALESCE(SUM(subagent_call_count), 0) AS subagent_call_count,
-        COALESCE(SUM(conversation_turns), 0) AS conversation_turns
-      FROM sessions
-      WHERE session_id = ? OR session_id LIKE ? || '${SESSION_DAY_DELIM}%'`
-    )
-    .bind(realId, realId)
-    .first<{
-      input_tokens: number;
-      output_tokens: number;
-      cache_read_tokens: number;
-      cache_creation_tokens: number;
-      skill_call_count: number;
-      mcp_call_count: number;
-      subagent_call_count: number;
-      conversation_turns: number;
-    }>();
+  const [prevRes, prevToolRes] = (await db.batch([
+    db
+      .prepare(
+        `SELECT
+          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+          COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+          COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+          COALESCE(SUM(skill_call_count), 0) AS skill_call_count,
+          COALESCE(SUM(mcp_call_count), 0) AS mcp_call_count,
+          COALESCE(SUM(subagent_call_count), 0) AS subagent_call_count,
+          COALESCE(SUM(conversation_turns), 0) AS conversation_turns
+        FROM sessions
+        WHERE session_id = ?`
+      )
+      .bind(sessionId),
+    db
+      .prepare(
+        `SELECT day, kind, name, call_count
+        FROM session_tool_counts
+        WHERE session_id = ?`
+      )
+      .bind(sessionId),
+  ])) as [D1Result<SessionTotalsRow>, D1Result<ToolCountRow>];
+  const prev = prevRes.results[0];
 
   // Clamp to >= 0: cumulative totals are monotonic for an append-only
   // transcript, but guard against a re-parse reporting a smaller total.
   const d = (now: number, before: number | undefined) => Math.max(0, now - (before ?? 0));
-  const dInput = d(session.input_tokens, prev?.input_tokens);
-  const dOutput = d(session.output_tokens, prev?.output_tokens);
-  const dCacheRead = d(session.cache_read_tokens, prev?.cache_read_tokens);
-  const dCacheCreation = d(session.cache_creation_tokens, prev?.cache_creation_tokens);
-  const dSkill = d(skill_events.length, prev?.skill_call_count);
-  const dMcp = d(mcp_events.length, prev?.mcp_call_count);
-  const dSubagent = d(subagent_events.length, prev?.subagent_call_count);
-  const dTurns = d(session.conversation_turns, prev?.conversation_turns);
 
   const statements: D1PreparedStatement[] = [];
 
   // Add this upload's deltas to the day's row (created on first sight of the
   // day). Additive columns accumulate; metadata reflects the latest upload, and
-  // first/last_event_at widen to the session's full span so duration_seconds
-  // (a generated column) stays meaningful per row. An identical re-fire yields
-  // all-zero deltas, leaving the row unchanged.
+  // first/last_event_at widen to the session's full span. An identical re-fire
+  // yields all-zero deltas, leaving the row unchanged.
   statements.push(
     db
       .prepare(
         `INSERT INTO sessions (
-          session_id, user_id, project_dir, git_branch, claude_code_version,
-          model, first_event_at, last_event_at,
+          session_id, day, user_id, project_dir, repo_name, git_branch,
+          claude_code_version, model, first_event_at, last_event_at,
           skill_call_count, mcp_call_count, subagent_call_count, conversation_turns,
           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, day) DO UPDATE SET
           user_id = excluded.user_id,
           project_dir = excluded.project_dir,
+          repo_name = excluded.repo_name,
           git_branch = excluded.git_branch,
           claude_code_version = excluded.claude_code_version,
           model = excluded.model,
@@ -123,84 +150,76 @@ export async function upsertSessionAndEvents(
           cache_creation_tokens = sessions.cache_creation_tokens + excluded.cache_creation_tokens`
       )
       .bind(
-        dayKey,
+        sessionId,
+        day,
         userId,
         session.project_dir,
+        repoName,
         session.git_branch ?? null,
         session.claude_code_version ?? null,
         session.model,
         session.first_event_at,
         session.last_event_at,
-        dSkill,
-        dMcp,
-        dSubagent,
-        dTurns,
-        dInput,
-        dOutput,
-        dCacheRead,
-        dCacheCreation
+        d(skill_events.length, prev?.skill_call_count),
+        d(mcp_events.length, prev?.mcp_call_count),
+        d(subagent_events.length, prev?.subagent_call_count),
+        d(session.conversation_turns, prev?.conversation_turns),
+        d(session.input_tokens, prev?.input_tokens),
+        d(session.output_tokens, prev?.output_tokens),
+        d(session.cache_read_tokens, prev?.cache_read_tokens),
+        d(session.cache_creation_tokens, prev?.cache_creation_tokens)
       )
   );
 
-  statements.push(
-    db.prepare("DELETE FROM skill_usage_events WHERE session_id = ?").bind(session.session_id)
-  );
-  statements.push(
-    db.prepare("DELETE FROM mcp_usage_events WHERE session_id = ?").bind(session.session_id)
-  );
-  statements.push(
-    db.prepare("DELETE FROM subagent_usage_events WHERE session_id = ?").bind(session.session_id)
-  );
+  // Tool usage: count this snapshot's events per (event day, kind, name), then
+  // add only the increment over what this session has already contributed to
+  // the daily rollup. Names that shrink on re-parse are left as-is (clamped).
+  const current = new Map<string, ToolCountRow>();
+  const count = (kind: ToolKind, name: string, ts: string) => {
+    const eventDay = dayOf(ts, day);
+    const key = toolKey(eventDay, kind, name);
+    const row = current.get(key);
+    if (row) row.call_count += 1;
+    else current.set(key, { day: eventDay, kind, name, call_count: 1 });
+  };
+  for (const e of skill_events) count("skill", e.skill_name, e.timestamp);
+  for (const e of mcp_events) count("mcp", e.mcp_server, e.timestamp);
+  for (const e of subagent_events) {
+    count("subagent", e.subagent_type ?? UNSPECIFIED_SUBAGENT, e.timestamp);
+  }
 
-  // Insert skill events
-  for (const event of skill_events) {
+  const credited = new Map<string, number>();
+  for (const r of prevToolRes.results) {
+    credited.set(toolKey(r.day, r.kind, r.name), r.call_count);
+  }
+
+  for (const row of current.values()) {
+    const key = toolKey(row.day, row.kind, row.name);
+    const delta = d(row.call_count, credited.get(key));
+    if (delta === 0) continue;
     statements.push(
       db
         .prepare(
-          `INSERT INTO skill_usage_events (session_id, user_id, skill_name, timestamp)
-           VALUES (?, ?, ?, ?)`
+          `INSERT INTO tool_usage_daily (day, user_id, repo_name, kind, name, call_count)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(day, user_id, repo_name, kind, name) DO UPDATE SET
+             call_count = tool_usage_daily.call_count + excluded.call_count`
         )
-        .bind(session.session_id, userId, event.skill_name, event.timestamp)
+        .bind(row.day, userId, repoName, row.kind, row.name, delta)
     );
-  }
-
-  // Insert MCP events
-  for (const event of mcp_events) {
     statements.push(
       db
         .prepare(
-          `INSERT INTO mcp_usage_events (session_id, user_id, tool_name, mcp_server, mcp_method, timestamp)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO session_tool_counts (session_id, day, kind, name, call_count)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(session_id, day, kind, name) DO UPDATE SET
+             call_count = excluded.call_count`
         )
-        .bind(
-          session.session_id,
-          userId,
-          event.tool_name,
-          event.mcp_server,
-          event.mcp_method,
-          event.timestamp
-        )
+        .bind(sessionId, row.day, row.kind, row.name, row.call_count)
     );
   }
 
-  // Insert subagent events
-  for (const event of subagent_events) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO subagent_usage_events (session_id, user_id, subagent_type, timestamp)
-           VALUES (?, ?, ?, ?)`
-        )
-        .bind(
-          session.session_id,
-          userId,
-          event.subagent_type,
-          event.timestamp
-        )
-    );
-  }
-
-  // D1 batch: up to 1000 bound parameters. Chunk if needed.
+  // D1 batch: keep each batch comfortably under the bound-parameter limit.
   const CHUNK_SIZE = 100;
   for (let i = 0; i < statements.length; i += CHUNK_SIZE) {
     await db.batch(statements.slice(i, i + CHUNK_SIZE));
@@ -213,98 +232,41 @@ export async function upsertSessionAndEvents(
   };
 }
 
-// SQL expression to extract repo name (last path segment) from a project_dir
-// column expression. Normalize Windows-style backslashes to '/' first so the
-// same logic works for both POSIX paths and paths captured on Windows
-// (e.g. "D:\\Work\\repo").
-const REPO_NAME_FROM = (colExpr: string) => {
-  const norm = `REPLACE(${colExpr}, '\\', '/')`;
-  return `SUBSTR(${norm}, LENGTH(RTRIM(${norm}, REPLACE(${norm}, '/', ''))) + 1)`;
+type UserRow = { id: number; email: string };
+type SumsRow = {
+  day: string;
+  user_id: number;
+  model: string;
+  conversation_turns: number;
+  skill_call_count: number;
+  mcp_call_count: number;
+  subagent_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
 };
-const REPO_NAME_EXPR = (prefix: string) =>
-  REPO_NAME_FROM(prefix ? `${prefix}.project_dir` : "project_dir");
+type SessionCountRow = { user_id: number; repo_name: string; session_count: number };
+type ToolDailyRow = { day: string; kind: ToolKind; name: string; count: number };
+type SessionRow = {
+  session_id: string;
+  day: string;
+  user_id: number;
+  repo_name: string;
+  model: string;
+  first_event_at: string;
+  last_event_at: string;
+  conversation_turns: number;
+  skill_call_count: number;
+  mcp_call_count: number;
+  subagent_call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+};
 
-// Sessions are stored one row per (session, day): the PK session_id holds
-// "<realSessionId>#<YYYY-MM-DD>" and each row carries only that day's delta, so
-// SUM(...) over a session's rows yields its running total and DATE grouping is
-// exact. These helpers recover the real session id and the activity day from
-// the composite key. They tolerate legacy rows written before this scheme
-// (plain real id, no '#') — those fall back to DATE(first/last_event_at).
-const SESSION_DAY_DELIM = "#";
-const REAL_SESSION_ID = (col: string) =>
-  `CASE WHEN INSTR(${col}, '${SESSION_DAY_DELIM}') > 0` +
-  ` THEN SUBSTR(${col}, 1, INSTR(${col}, '${SESSION_DAY_DELIM}') - 1) ELSE ${col} END`;
-const SESSION_DAY = (col: string, fallbackTs: string) =>
-  `CASE WHEN INSTR(${col}, '${SESSION_DAY_DELIM}') > 0` +
-  ` THEN SUBSTR(${col}, INSTR(${col}, '${SESSION_DAY_DELIM}') + 1) ELSE DATE(${fallbackTs}) END`;
-
-/** Build WHERE clause and bind params for session-table queries */
-function buildSessionFilter(
-  hasDateFilter: boolean,
-  dateFilter: string,
-  userId: number | undefined,
-  repo: string | undefined,
-  prefix = "",
-): { where: string; params: unknown[] } {
-  const p = prefix ? `${prefix}.` : "";
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  if (hasDateFilter) {
-    // Filter on last_event_at, not first_event_at. Every day-row widens
-    // last_event_at to the session's final activity (MAX), so a session that
-    // started before the window but ran into it stays visible; one whose last
-    // activity predates the window drops out. first_event_at is widened to the
-    // session start (MIN) and would wrongly exclude such long-running sessions.
-    conditions.push(`${p}last_event_at >= datetime('now', ?)`);
-    params.push(dateFilter);
-  }
-  if (userId !== undefined) {
-    conditions.push(`${p}user_id = ?`);
-    params.push(userId);
-  }
-  if (repo) {
-    conditions.push(`REPLACE(${p}project_dir, '\\', '/') LIKE '%/' || ?`);
-    params.push(repo);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return { where, params };
-}
-
-/** Build WHERE clause for event-table queries, optionally joining to sessions for repo filter */
-function buildEventFilter(
-  hasDateFilter: boolean,
-  dateFilter: string,
-  userId: number | undefined,
-  repo: string | undefined,
-  timestampCol: string,
-  eventAlias: string,
-): { join: string; where: string; params: unknown[] } {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  let join = "";
-  if (hasDateFilter) {
-    conditions.push(`${eventAlias}.${timestampCol} >= datetime('now', ?)`);
-    params.push(dateFilter);
-  }
-  if (userId !== undefined) {
-    conditions.push(`${eventAlias}.user_id = ?`);
-    params.push(userId);
-  }
-  if (repo) {
-    // sessions is keyed by "<realId>#<date>", so a plain equi-join on
-    // session_id no longer matches the event's real id and would also fan out
-    // across a session's day-rows. Match on the recovered real id via EXISTS to
-    // filter without duplicating event rows.
-    conditions.push(
-      `EXISTS (SELECT 1 FROM sessions _fs
-        WHERE ${REAL_SESSION_ID("_fs.session_id")} = ${eventAlias}.session_id
-        AND REPLACE(_fs.project_dir, '\\', '/') LIKE '%/' || ?)`
-    );
-    params.push(repo);
-  }
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return { join, where, params };
-}
+const rows = <T>(r: D1Result): T[] => r.results as T[];
 
 export async function getDashboardData(
   db: D1Database,
@@ -312,351 +274,282 @@ export async function getDashboardData(
   userId?: number,
   repo?: string,
 ): Promise<DashboardData> {
-  // days === 0 means "all time" — no date filter
+  // days === 0 means "all time" — no date filter. The window is measured in
+  // whole activity days so every panel (KPI, trend, tools, sessions) sees the
+  // same set of rows.
   const hasDateFilter = days > 0;
   const dateFilter = `-${days} days`;
 
-  // Pre-build common filter clauses
-  const sf = buildSessionFilter(hasDateFilter, dateFilter, userId, repo);
-  const sfJoin = buildSessionFilter(hasDateFilter, dateFilter, userId, repo, "s");
+  const filter = (withUserRepo: boolean): { where: string; params: unknown[] } => {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (hasDateFilter) {
+      conditions.push(`day >= date('now', ?)`);
+      params.push(dateFilter);
+    }
+    if (withUserRepo && userId !== undefined) {
+      conditions.push(`user_id = ?`);
+      params.push(userId);
+    }
+    if (withUserRepo && repo) {
+      conditions.push(`repo_name = ?`);
+      params.push(repo);
+    }
+    return { where: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
+  };
+  const full = filter(true);
+  const dateOnly = filter(false);
 
-  // KPI aggregation. Token/turn/call SUMs are correct as-is because each
-  // day-row holds a delta; only the session count must collapse a session's
-  // day-rows back to one via the recovered real id.
-  const kpiRaw = await db.prepare(
-    `SELECT
-      COUNT(DISTINCT ${REAL_SESSION_ID("session_id")}) as total_sessions,
-      COALESCE(SUM(conversation_turns), 0) as total_conversation_turns,
-      COALESCE(SUM(skill_call_count), 0) as total_skill_calls,
-      COALESCE(SUM(mcp_call_count), 0) as total_mcp_calls,
-      COALESCE(SUM(subagent_call_count), 0) as total_subagent_calls,
-      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens), 0) as total_tokens
-    FROM sessions
-    ${sf.where}`
-  ).bind(...sf.params).first<Omit<KpiData, "total_estimated_cost">>();
-
-  // KPI cost: aggregate per model then compute
-  type ModelTokenRow = { model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number };
-  const kpiCostResult = await db.prepare(
-    `SELECT model,
-      SUM(input_tokens) as input_tokens,
-      SUM(output_tokens) as output_tokens,
-      SUM(cache_read_tokens) as cache_read_tokens,
-      SUM(cache_creation_tokens) as cache_creation_tokens
-    FROM sessions
-    ${sf.where}
-    GROUP BY model`
-  ).bind(...sf.params).all<ModelTokenRow>();
-  const totalEstimatedCost = kpiCostResult.results.reduce(
-    (sum, r) => sum + calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens),
-    0
-  );
-
-  const kpiResult: KpiData = {
-    total_sessions: kpiRaw?.total_sessions ?? 0,
-    total_conversation_turns: kpiRaw?.total_conversation_turns ?? 0,
-    total_skill_calls: kpiRaw?.total_skill_calls ?? 0,
-    total_mcp_calls: kpiRaw?.total_mcp_calls ?? 0,
-    total_subagent_calls: kpiRaw?.total_subagent_calls ?? 0,
-    total_tokens: kpiRaw?.total_tokens ?? 0,
-    total_estimated_cost: totalEstimatedCost,
+  // Without ANALYZE statistics SQLite tends to prefer a full scan that yields
+  // GROUP BY order over the (much smaller) day-range scan, so name the index.
+  const sessionsFrom = (withUserRepo: boolean): string => {
+    if (withUserRepo && userId !== undefined) return "sessions INDEXED BY idx_sessions_user_day";
+    if (hasDateFilter) return "sessions INDEXED BY idx_sessions_day";
+    return "sessions";
   };
 
-  // User ranking by cost (aggregate per user+model, then compute cost in app)
-  type UserModelRow = { user_id: number; email: string; model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; session_count: number };
-  const userRankingRaw = await db.prepare(
-    `SELECT u.id as user_id, u.email, s.model,
-      SUM(s.input_tokens) as input_tokens,
-      SUM(s.output_tokens) as output_tokens,
-      SUM(s.cache_read_tokens) as cache_read_tokens,
-      SUM(s.cache_creation_tokens) as cache_creation_tokens,
-      COUNT(DISTINCT ${REAL_SESSION_ID("s.session_id")}) as session_count
-    FROM sessions s JOIN users u ON s.user_id = u.id
-    ${sfJoin.where}
-    GROUP BY s.user_id, s.model`
-  ).bind(...sfJoin.params).all<UserModelRow>();
+  // One round trip; each statement scans the window once. Token/turn/call
+  // aggregates are grouped finely enough (day × user × model) to derive the
+  // KPI totals, cost by model, user ranking and daily trend in memory.
+  // Distinct session counts are grouped by (user, repo) — both constant across
+  // a session's day-rows — so they can be re-summed per user, per repo or in
+  // total without double counting; the per-model split needs its own query.
+  const [usersRes, sumsRes, countsRes, modelRes, toolsRes, recentRes] = await db.batch([
+    db.prepare(`SELECT id, email FROM users`),
+    db
+      .prepare(
+        `SELECT day, user_id, model,
+          SUM(conversation_turns) AS conversation_turns,
+          SUM(skill_call_count) AS skill_call_count,
+          SUM(mcp_call_count) AS mcp_call_count,
+          SUM(subagent_call_count) AS subagent_call_count,
+          SUM(input_tokens) AS input_tokens,
+          SUM(output_tokens) AS output_tokens,
+          SUM(cache_read_tokens) AS cache_read_tokens,
+          SUM(cache_creation_tokens) AS cache_creation_tokens
+        FROM ${sessionsFrom(true)}
+        ${full.where}
+        GROUP BY day, user_id, model`
+      )
+      .bind(...full.params),
+    db
+      .prepare(
+        `SELECT user_id, repo_name, COUNT(DISTINCT session_id) AS session_count
+        FROM ${sessionsFrom(false)}
+        ${dateOnly.where}
+        GROUP BY user_id, repo_name`
+      )
+      .bind(...dateOnly.params),
+    db
+      .prepare(
+        `SELECT model AS name, COUNT(DISTINCT session_id) AS count
+        FROM ${sessionsFrom(true)}
+        ${full.where}
+        GROUP BY model
+        ORDER BY count DESC`
+      )
+      .bind(...full.params),
+    db
+      .prepare(
+        `SELECT day, kind, name, SUM(call_count) AS count
+        FROM tool_usage_daily
+        ${full.where}
+        GROUP BY day, kind, name`
+      )
+      .bind(...full.params),
+    // Recent sessions: pick the most recently active sessions in the window,
+    // then pull every day-row of just those sessions (PK lookups) so each entry
+    // shows the session's full totals plus its latest day's portion.
+    db
+      .prepare(
+        `SELECT session_id, day, user_id, repo_name, model, first_event_at, last_event_at,
+          conversation_turns, skill_call_count, mcp_call_count, subagent_call_count,
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+        FROM sessions
+        WHERE session_id IN (
+          SELECT session_id FROM ${sessionsFrom(true)}
+          ${full.where}
+          GROUP BY session_id
+          ORDER BY MAX(last_event_at) DESC
+          LIMIT ${RECENT_SESSIONS_LIMIT}
+        )
+        ORDER BY session_id, day`
+      )
+      .bind(...full.params),
+  ]);
 
-  const userMap = new Map<number, { user_id: number; email: string; total_cost: number; total_sessions: number }>();
-  for (const r of userRankingRaw.results) {
-    const cost = calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens);
-    const existing = userMap.get(r.user_id) ?? { user_id: r.user_id, email: r.email, total_cost: 0, total_sessions: 0 };
-    existing.total_cost += cost;
-    existing.total_sessions += r.session_count;
-    userMap.set(r.user_id, existing);
-  }
-  const userRanking: UserRankingEntry[] = Array.from(userMap.values())
-    .sort((a, b) => b.total_cost - a.total_cost)
-    .slice(0, 10);
+  const emailById = new Map(rows<UserRow>(usersRes).map((u) => [u.id, u.email]));
+  const emailOf = (id: number) => emailById.get(id) ?? "";
 
-  // Skill distribution
-  const skillEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
-  const skillDistResult = await db.prepare(
-    `SELECT e.skill_name as name, COUNT(*) as count
-    FROM skill_usage_events e ${skillEf.join}
-    ${skillEf.where}
-    GROUP BY e.skill_name
-    ORDER BY count DESC`
-  ).bind(...skillEf.params).all<DistributionEntry>();
-
-  // MCP server distribution
-  const mcpEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
-  const mcpDistResult = await db.prepare(
-    `SELECT e.mcp_server as name, COUNT(*) as count
-    FROM mcp_usage_events e ${mcpEf.join}
-    ${mcpEf.where}
-    GROUP BY e.mcp_server
-    ORDER BY count DESC`
-  ).bind(...mcpEf.params).all<DistributionEntry>();
-
-  // Model distribution
-  const modelDistResult = await db.prepare(
-    `SELECT model as name, COUNT(DISTINCT ${REAL_SESSION_ID("session_id")}) as count
-    FROM sessions
-    ${sf.where}
-    GROUP BY model
-    ORDER BY count DESC`
-  ).bind(...sf.params).all<DistributionEntry>();
-
-  // Subagent distribution
-  const subEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
-  const subagentDistResult = await db.prepare(
-    `SELECT COALESCE(e.subagent_type, '(unspecified)') as name, COUNT(*) as count
-    FROM subagent_usage_events e ${subEf.join}
-    ${subEf.where}
-    GROUP BY e.subagent_type
-    ORDER BY count DESC`
-  ).bind(...subEf.params).all<DistributionEntry>();
-
-  // Daily cost/token trend (aggregate per date+model, compute cost in app).
-  // Each row already holds a single day's delta keyed by that day, so grouping
-  // on the day recovered from the PK attributes tokens to the day they were
-  // consumed — a multi-day session is split across the days it ran instead of
-  // piling onto its start day.
-  type DailyModelRow = { date: string; model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number };
-  // Legacy plain-id rows (pre day-keying) keep their original start-day
-  // attribution; composite rows use their embedded day.
-  const trendDate = SESSION_DAY("session_id", "first_event_at");
-  const trendConditions: string[] = [];
-  const trendParams: unknown[] = [];
-  if (hasDateFilter) {
-    trendConditions.push(`${trendDate} >= date('now', ?)`);
-    trendParams.push(dateFilter);
-  }
-  if (userId !== undefined) {
-    trendConditions.push(`user_id = ?`);
-    trendParams.push(userId);
-  }
-  if (repo) {
-    trendConditions.push(`REPLACE(project_dir, '\\', '/') LIKE '%/' || ?`);
-    trendParams.push(repo);
-  }
-  const trendWhere = trendConditions.length > 0 ? `WHERE ${trendConditions.join(" AND ")}` : "";
-  const dailyTrendRaw = await db.prepare(
-    `SELECT
-      ${trendDate} as date,
-      model,
-      SUM(input_tokens) as input_tokens,
-      SUM(output_tokens) as output_tokens,
-      SUM(cache_read_tokens) as cache_read_tokens,
-      SUM(cache_creation_tokens) as cache_creation_tokens
-    FROM sessions
-    ${trendWhere}
-    GROUP BY ${trendDate}, model
-    ORDER BY date`
-  ).bind(...trendParams).all<DailyModelRow>();
-
+  // KPI totals, cost per user and daily trend from the summed rows.
+  const kpi: KpiData = {
+    total_sessions: 0,
+    total_conversation_turns: 0,
+    total_skill_calls: 0,
+    total_mcp_calls: 0,
+    total_subagent_calls: 0,
+    total_tokens: 0,
+    total_estimated_cost: 0,
+  };
+  const costByUser = new Map<number, number>();
   const dailyMap = new Map<string, DailyTrendEntry>();
-  for (const r of dailyTrendRaw.results) {
-    const cost = calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens);
-    const existing = dailyMap.get(r.date) ?? { date: r.date, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, estimated_cost: 0 };
-    existing.input_tokens += r.input_tokens;
-    existing.output_tokens += r.output_tokens;
-    existing.cache_read_tokens += r.cache_read_tokens;
-    existing.cache_creation_tokens += r.cache_creation_tokens;
-    existing.estimated_cost += cost;
-    dailyMap.set(r.date, existing);
+  for (const r of rows<SumsRow>(sumsRes)) {
+    const cost = calculateEstimatedCost(
+      r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
+    );
+    const tokens = r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens;
+
+    kpi.total_conversation_turns += r.conversation_turns;
+    kpi.total_skill_calls += r.skill_call_count;
+    kpi.total_mcp_calls += r.mcp_call_count;
+    kpi.total_subagent_calls += r.subagent_call_count;
+    kpi.total_tokens += tokens;
+    kpi.total_estimated_cost += cost;
+
+    costByUser.set(r.user_id, (costByUser.get(r.user_id) ?? 0) + cost);
+
+    const daily = dailyMap.get(r.day) ?? {
+      date: r.day, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, estimated_cost: 0,
+    };
+    daily.input_tokens += r.input_tokens;
+    daily.output_tokens += r.output_tokens;
+    daily.cache_read_tokens += r.cache_read_tokens;
+    daily.cache_creation_tokens += r.cache_creation_tokens;
+    daily.estimated_cost += cost;
+    dailyMap.set(r.day, daily);
   }
   const dailyTrend = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Daily tool usage — each sub-query needs its own filter
-  const skillToolEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
-  const mcpToolEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
-  const subToolEf = buildEventFilter(hasDateFilter, dateFilter, userId, repo, "timestamp", "e");
+  // Session counts: selectors ignore the user/repo filter; everything else
+  // applies it.
+  const sessionsByUser = new Map<number, number>();
+  const sessionsByRepo = new Map<string, number>();
+  const filteredSessionsByUser = new Map<number, number>();
+  for (const r of rows<SessionCountRow>(countsRes)) {
+    sessionsByUser.set(r.user_id, (sessionsByUser.get(r.user_id) ?? 0) + r.session_count);
+    sessionsByRepo.set(r.repo_name, (sessionsByRepo.get(r.repo_name) ?? 0) + r.session_count);
+    const matches = (userId === undefined || r.user_id === userId) && (!repo || r.repo_name === repo);
+    if (matches) {
+      kpi.total_sessions += r.session_count;
+      filteredSessionsByUser.set(r.user_id, (filteredSessionsByUser.get(r.user_id) ?? 0) + r.session_count);
+    }
+  }
 
-  const dailyToolQuery = `SELECT
-      date,
-      SUM(skill_count) as skill_count,
-      SUM(mcp_count) as mcp_count,
-      SUM(subagent_count) as subagent_count
-    FROM (
-      SELECT DATE(e.timestamp) as date, COUNT(*) as skill_count, 0 as mcp_count, 0 as subagent_count
-      FROM skill_usage_events e ${skillToolEf.join}
-      ${skillToolEf.where}
-      GROUP BY DATE(e.timestamp)
-      UNION ALL
-      SELECT DATE(e.timestamp) as date, 0, COUNT(*), 0
-      FROM mcp_usage_events e ${mcpToolEf.join}
-      ${mcpToolEf.where}
-      GROUP BY DATE(e.timestamp)
-      UNION ALL
-      SELECT DATE(e.timestamp) as date, 0, 0, COUNT(*)
-      FROM subagent_usage_events e ${subToolEf.join}
-      ${subToolEf.where}
-      GROUP BY DATE(e.timestamp)
-    )
-    GROUP BY date
-    ORDER BY date`;
-  const dailyToolResult = await db.prepare(dailyToolQuery)
-    .bind(...skillToolEf.params, ...mcpToolEf.params, ...subToolEf.params)
-    .all<DailyToolUsageEntry>();
+  const userRanking: UserRankingEntry[] = Array.from(filteredSessionsByUser, ([id, total_sessions]) => ({
+    user_id: id,
+    email: emailOf(id),
+    total_cost: costByUser.get(id) ?? 0,
+    total_sessions,
+  }))
+    .sort((a, b) => b.total_cost - a.total_cost)
+    .slice(0, USER_RANKING_LIMIT);
 
-  // Recent sessions. A session now spans several day-rows, so collapse them
-  // back to one entry per real session id: SUM the additive metrics, take the
-  // widest span (MIN first / MAX last) and the latest metadata. duration_seconds
-  // is a per-row generated column over the full span, so MAX gives the session
-  // duration. A window function flags each session's most recent day-row so we
-  // can also expose that day's portion (latest_* columns) alongside the totals.
-  //
-  // Unlike the windowed KPI/Trend aggregates, a session that ran into the
-  // window shows its FULL totals here, not just the in-window portion: each row
-  // in this list represents a whole session, so a partial token count would be
-  // misleading. We qualify a session by ANY of its day-rows touching the window
-  // (EXISTS), then SUM across ALL of its rows. The user/repo filter applies to
-  // the summed rows directly — those columns are constant across a session's
-  // day-rows, so they keep every row of a qualifying session. Because the inner
-  // subquery now holds every day-row of a qualifying session, is_latest marks
-  // the session's true most recent day regardless of the window.
-  const recentConditions: string[] = [];
-  const recentParams: unknown[] = [];
-  if (userId !== undefined) {
-    recentConditions.push(`s.user_id = ?`);
-    recentParams.push(userId);
-  }
-  if (repo) {
-    recentConditions.push(`REPLACE(s.project_dir, '\\', '/') LIKE '%/' || ?`);
-    recentParams.push(repo);
-  }
-  if (hasDateFilter) {
-    recentConditions.push(
-      `EXISTS (SELECT 1 FROM sessions _w
-        WHERE ${REAL_SESSION_ID("_w.session_id")} = ${REAL_SESSION_ID("s.session_id")}
-        AND _w.last_event_at >= datetime('now', ?))`
-    );
-    recentParams.push(dateFilter);
-  }
-  const recentWhere = recentConditions.length > 0 ? `WHERE ${recentConditions.join(" AND ")}` : "";
-  type RecentSessionRow = Omit<
-    RecentSessionEntry,
-    "estimated_cost_usd" | "latest_total_tokens" | "latest_estimated_cost_usd"
-  > & {
-    latest_input_tokens: number;
-    latest_output_tokens: number;
-    latest_cache_read_tokens: number;
-    latest_cache_creation_tokens: number;
+  const users: UserEntry[] = Array.from(sessionsByUser, ([id, session_count]) => ({
+    user_id: id,
+    email: emailOf(id),
+    session_count,
+  })).sort((a, b) => b.session_count - a.session_count);
+
+  const repos: RepoEntry[] = Array.from(sessionsByRepo, ([repo_name, session_count]) => ({
+    repo_name,
+    session_count,
+  })).sort((a, b) => b.session_count - a.session_count);
+
+  // Tool usage: distributions per kind and the per-day stacked counts.
+  const dist: Record<ToolKind, Map<string, number>> = {
+    skill: new Map(),
+    mcp: new Map(),
+    subagent: new Map(),
   };
-  const rid = REAL_SESSION_ID("s.session_id");
-  const sday = SESSION_DAY("s.session_id", "s.first_event_at");
-  const recentSessionsRaw = await db.prepare(
-    `SELECT
-      rid as session_id,
-      MAX(user_id) as user_id, MAX(email) as email,
-      ${REPO_NAME_FROM("MAX(project_dir)")} as repo_name,
-      MAX(model) as model, MAX(duration_seconds) as duration_seconds,
-      SUM(conversation_turns) as conversation_turns, SUM(skill_call_count) as skill_call_count,
-      SUM(mcp_call_count) as mcp_call_count, SUM(subagent_call_count) as subagent_call_count,
-      SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
-      SUM(cache_read_tokens) as cache_read_tokens, SUM(cache_creation_tokens) as cache_creation_tokens,
-      MAX(last_event_at) as last_event_at,
-      SUM(CASE WHEN is_latest = 1 THEN conversation_turns ELSE 0 END) as latest_conversation_turns,
-      SUM(CASE WHEN is_latest = 1 THEN skill_call_count ELSE 0 END) as latest_skill_call_count,
-      SUM(CASE WHEN is_latest = 1 THEN mcp_call_count ELSE 0 END) as latest_mcp_call_count,
-      SUM(CASE WHEN is_latest = 1 THEN subagent_call_count ELSE 0 END) as latest_subagent_call_count,
-      SUM(CASE WHEN is_latest = 1 THEN input_tokens ELSE 0 END) as latest_input_tokens,
-      SUM(CASE WHEN is_latest = 1 THEN output_tokens ELSE 0 END) as latest_output_tokens,
-      SUM(CASE WHEN is_latest = 1 THEN cache_read_tokens ELSE 0 END) as latest_cache_read_tokens,
-      SUM(CASE WHEN is_latest = 1 THEN cache_creation_tokens ELSE 0 END) as latest_cache_creation_tokens
-    FROM (
-      SELECT
-        ${rid} as rid,
-        s.user_id, u.email, s.project_dir, s.model, s.duration_seconds,
-        s.conversation_turns, s.skill_call_count, s.mcp_call_count, s.subagent_call_count,
-        s.input_tokens, s.output_tokens, s.cache_read_tokens, s.cache_creation_tokens, s.last_event_at,
-        CASE WHEN ${sday} = MAX(${sday}) OVER (PARTITION BY ${rid}) THEN 1 ELSE 0 END as is_latest
-      FROM sessions s JOIN users u ON s.user_id = u.id
-      ${recentWhere}
-    )
-    GROUP BY rid
-    ORDER BY last_event_at DESC
-    LIMIT 20`
-  ).bind(...recentParams).all<RecentSessionRow>();
-
-  const recentSessions: RecentSessionEntry[] = recentSessionsRaw.results.map((r) => {
-    const {
-      latest_input_tokens,
-      latest_output_tokens,
-      latest_cache_read_tokens,
-      latest_cache_creation_tokens,
-      ...rest
-    } = r;
-    return {
-      ...rest,
-      estimated_cost_usd: calculateEstimatedCost(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens),
-      latest_total_tokens:
-        latest_input_tokens + latest_output_tokens + latest_cache_read_tokens + latest_cache_creation_tokens,
-      latest_estimated_cost_usd: calculateEstimatedCost(
-        r.model,
-        latest_input_tokens,
-        latest_output_tokens,
-        latest_cache_read_tokens,
-        latest_cache_creation_tokens
-      ),
-    };
-  });
-
-  // Users list (date-filtered only, no user/repo filter so the selector always shows all users)
-  const dateOnlyFilter = buildSessionFilter(hasDateFilter, dateFilter, undefined, undefined);
-  const dateOnlyJoinFilter = buildSessionFilter(hasDateFilter, dateFilter, undefined, undefined, "s");
-  const usersResult = await db.prepare(
-    `SELECT u.id as user_id, u.email, COUNT(DISTINCT ${REAL_SESSION_ID("s.session_id")}) as session_count
-    FROM sessions s JOIN users u ON s.user_id = u.id
-    ${dateOnlyJoinFilter.where}
-    GROUP BY u.id
-    ORDER BY session_count DESC`
-  ).bind(...dateOnlyJoinFilter.params).all<UserEntry>();
-
-  // Repos list (date-filtered only, no user/repo filter so the selector always shows all repos)
-  const reposResult = await db.prepare(
-    `SELECT
-      ${REPO_NAME_EXPR("")} as repo_name,
-      COUNT(DISTINCT ${REAL_SESSION_ID("session_id")}) as session_count
-    FROM sessions
-    ${dateOnlyFilter.where}
-    GROUP BY repo_name
-    ORDER BY session_count DESC`
-  ).bind(...dateOnlyFilter.params).all<RepoEntry>();
-
-  // Look up user email for filter display
-  let filterUserEmail: string | undefined;
-  if (userId !== undefined) {
-    const userRow = await db.prepare("SELECT email FROM users WHERE id = ?").bind(userId).first<{ email: string }>();
-    filterUserEmail = userRow?.email;
+  const dailyTools = new Map<string, DailyToolUsageEntry>();
+  for (const r of rows<ToolDailyRow>(toolsRes)) {
+    const byName = dist[r.kind];
+    if (!byName) continue;
+    byName.set(r.name, (byName.get(r.name) ?? 0) + r.count);
+    const entry = dailyTools.get(r.day) ?? { date: r.day, skill_count: 0, mcp_count: 0, subagent_count: 0 };
+    if (r.kind === "skill") entry.skill_count += r.count;
+    else if (r.kind === "mcp") entry.mcp_count += r.count;
+    else entry.subagent_count += r.count;
+    dailyTools.set(r.day, entry);
   }
+  const toDistribution = (m: Map<string, number>): DistributionEntry[] =>
+    Array.from(m, ([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+  const dailyToolUsage = Array.from(dailyTools.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Recent sessions: collapse day-rows (ordered by day) into one entry each.
+  // Metadata comes from the latest day-row, which also provides the
+  // "latest day" portion shown next to the totals.
+  const bySession = new Map<string, SessionRow[]>();
+  for (const r of rows<SessionRow>(recentRes)) {
+    const list = bySession.get(r.session_id);
+    if (list) list.push(r);
+    else bySession.set(r.session_id, [r]);
+  }
+  const durationSeconds = (first: string, last: string) => {
+    const ms = Date.parse(last) - Date.parse(first);
+    return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+  };
+  const recentSessions: RecentSessionEntry[] = Array.from(bySession.values())
+    .map((dayRows) => {
+      const latest = dayRows[dayRows.length - 1];
+      const sum = (pick: (r: SessionRow) => number) => dayRows.reduce((acc, r) => acc + pick(r), 0);
+      const first_event_at = dayRows.reduce((m, r) => (r.first_event_at < m ? r.first_event_at : m), latest.first_event_at);
+      const last_event_at = dayRows.reduce((m, r) => (r.last_event_at > m ? r.last_event_at : m), latest.last_event_at);
+      const input_tokens = sum((r) => r.input_tokens);
+      const output_tokens = sum((r) => r.output_tokens);
+      const cache_read_tokens = sum((r) => r.cache_read_tokens);
+      const cache_creation_tokens = sum((r) => r.cache_creation_tokens);
+      return {
+        session_id: latest.session_id,
+        user_id: latest.user_id,
+        email: emailOf(latest.user_id),
+        repo_name: latest.repo_name,
+        model: latest.model,
+        duration_seconds: durationSeconds(first_event_at, last_event_at),
+        conversation_turns: sum((r) => r.conversation_turns),
+        skill_call_count: sum((r) => r.skill_call_count),
+        mcp_call_count: sum((r) => r.mcp_call_count),
+        subagent_call_count: sum((r) => r.subagent_call_count),
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens,
+        estimated_cost_usd: calculateEstimatedCost(
+          latest.model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+        ),
+        latest_conversation_turns: latest.conversation_turns,
+        latest_skill_call_count: latest.skill_call_count,
+        latest_mcp_call_count: latest.mcp_call_count,
+        latest_subagent_call_count: latest.subagent_call_count,
+        latest_total_tokens:
+          latest.input_tokens + latest.output_tokens + latest.cache_read_tokens + latest.cache_creation_tokens,
+        latest_estimated_cost_usd: calculateEstimatedCost(
+          latest.model,
+          latest.input_tokens,
+          latest.output_tokens,
+          latest.cache_read_tokens,
+          latest.cache_creation_tokens
+        ),
+        last_event_at,
+      };
+    })
+    .sort((a, b) => b.last_event_at.localeCompare(a.last_event_at));
 
   return {
-    kpi: kpiResult,
+    kpi,
     userRanking,
-    skillDistribution: skillDistResult.results,
-    mcpDistribution: mcpDistResult.results,
-    modelDistribution: modelDistResult.results,
-    subagentDistribution: subagentDistResult.results,
+    skillDistribution: toDistribution(dist.skill),
+    mcpDistribution: toDistribution(dist.mcp),
+    modelDistribution: rows<DistributionEntry>(modelRes),
+    subagentDistribution: toDistribution(dist.subagent),
     dailyTrend,
-    dailyToolUsage: dailyToolResult.results,
+    dailyToolUsage,
     recentSessions,
-    users: usersResult.results,
-    repos: reposResult.results,
+    users,
+    repos,
     days,
     filterUserId: userId,
-    filterUserEmail,
+    filterUserEmail: userId !== undefined ? emailById.get(userId) : undefined,
     filterRepo: repo,
   };
 }
