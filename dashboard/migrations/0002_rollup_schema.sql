@@ -10,7 +10,12 @@
 -- events are kept only as daily rollups (tool_usage_daily) plus the per-session
 -- counts needed to compute increments on re-upload (session_tool_counts).
 --
--- This is a breaking change: existing data is dropped, not migrated.
+-- This is a breaking change: existing data is dropped, not migrated, and the
+-- resulting schema does not work with the pre-0002 Worker. The D1 database
+-- name was therefore changed to claude-code-usage-dashboard-v2 (see
+-- dashboard/wrangler.toml): this migration runs against a freshly created
+-- database, and the old one is left alone as a fallback. The DROP statements
+-- below only clear what 0001_initial.sql just created.
 
 DROP TABLE IF EXISTS subagent_usage_events;
 DROP TABLE IF EXISTS mcp_usage_events;

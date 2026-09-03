@@ -17,13 +17,13 @@ wrangler login
 ### 1. Create a D1 database
 
 ```bash
-wrangler d1 create claude-code-usage
+wrangler d1 create claude-code-usage-dashboard-v2
 ```
 
 Example output:
 
 ```
-✅ Successfully created DB 'claude-code-usage'
+✅ Successfully created DB 'claude-code-usage-dashboard-v2'
 database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
@@ -119,10 +119,10 @@ CLAUDE_CODE_USAGE_DASHBOARD_CF_ACCESS_CLIENT_SECRET="<Client Secret>"
 When new migration SQL files are added to `migrations/`:
 
 ```bash
-wrangler d1 migrations apply claude-code-usage-dashboard --remote
+wrangler d1 migrations apply claude-code-usage-dashboard-v2 --remote
 ```
 
-> Migration `0002_rollup_schema.sql` rebuilds the schema to reduce D1 `rows_read` and **drops all existing data**. Deployments created before it will start with an empty dashboard after applying it.
+> Migration `0002_rollup_schema.sql` rebuilds the schema to reduce D1 `rows_read`, and the result is **not compatible with the pre-0002 Worker**. Because of that, the database name changed to `claude-code-usage-dashboard-v2`: create a new D1 database under that name instead of applying 0002 to the old `claude-code-usage-dashboard`. The old database is left untouched so it can be kept as a fallback (or deleted once the new one is verified), and the new dashboard starts empty.
 
 > For local environments, use the `--local` flag.
 
@@ -136,8 +136,8 @@ Use this to reset the DB to a clean state, e.g. after breaking schema changes.
 cd dashboard
 
 # 1. Drop all tables and migration history
-wrangler d1 execute claude-code-usage-dashboard --remote --command "DROP TABLE IF EXISTS session_tool_counts; DROP TABLE IF EXISTS tool_usage_daily; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
+wrangler d1 execute claude-code-usage-dashboard-v2 --remote --command "DROP TABLE IF EXISTS session_tool_counts; DROP TABLE IF EXISTS tool_usage_daily; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS d1_migrations;"
 
 # 2. Re-apply migrations
-wrangler d1 migrations apply claude-code-usage-dashboard --remote
+wrangler d1 migrations apply claude-code-usage-dashboard-v2 --remote
 ```
