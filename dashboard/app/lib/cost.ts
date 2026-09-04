@@ -9,6 +9,13 @@ interface ModelPricing {
 // Pricing is based on the pricing of Claude Code Pro
 // https://claude.com/pricing#api
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  // Fable 5.1 only: cache read is $0.25/MTok, not 10% of input like other models
+  "claude-fable-5-1": {
+    input: 10,
+    output: 50,
+    cache_read: 0.25,
+    cache_creation: 12.5,
+  },
   "claude-fable-5": {
     input: 10,
     output: 50,
