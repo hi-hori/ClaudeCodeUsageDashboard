@@ -61,6 +61,7 @@ type SessionTotalsRow = {
   mcp_call_count: number;
   subagent_call_count: number;
   conversation_turns: number;
+  cost_usd: number;
 };
 
 type ToolCountRow = { day: string; kind: ToolKind; name: string; call_count: number };
@@ -97,7 +98,8 @@ export async function upsertSessionAndEvents(
           COALESCE(SUM(skill_call_count), 0) AS skill_call_count,
           COALESCE(SUM(mcp_call_count), 0) AS mcp_call_count,
           COALESCE(SUM(subagent_call_count), 0) AS subagent_call_count,
-          COALESCE(SUM(conversation_turns), 0) AS conversation_turns
+          COALESCE(SUM(conversation_turns), 0) AS conversation_turns,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd
         FROM sessions
         WHERE session_id = ?`
       )
@@ -118,6 +120,24 @@ export async function upsertSessionAndEvents(
 
   const statements: D1PreparedStatement[] = [];
 
+  // A reported cost is cumulative for the whole session, so once one arrives
+  // every day-row must be priced from it. Rows still holding NULL (uploaded
+  // before the hook reported cost, or while Claude Code tracked none) would
+  // otherwise keep falling back to the pricing table and be counted twice on
+  // top of the full cumulative total credited below. Zero them first — the
+  // delta is measured against the same COALESCEd sum, so nothing is lost.
+  const reportedCost = session.estimated_cost_usd;
+  if (reportedCost != null) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE sessions SET cost_usd = 0
+          WHERE session_id = ? AND cost_usd IS NULL`
+        )
+        .bind(sessionId)
+    );
+  }
+
   // Add this upload's deltas to the day's row (created on first sight of the
   // day). Additive columns accumulate; metadata reflects the latest upload, and
   // first/last_event_at widen to the session's full span. An identical re-fire
@@ -129,8 +149,9 @@ export async function upsertSessionAndEvents(
           session_id, day, user_id, project_dir, repo_name, git_branch,
           claude_code_version, model, first_event_at, last_event_at,
           skill_call_count, mcp_call_count, subagent_call_count, conversation_turns,
-          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+          cost_usd
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id, day) DO UPDATE SET
           user_id = excluded.user_id,
           project_dir = excluded.project_dir,
@@ -147,7 +168,12 @@ export async function upsertSessionAndEvents(
           input_tokens = sessions.input_tokens + excluded.input_tokens,
           output_tokens = sessions.output_tokens + excluded.output_tokens,
           cache_read_tokens = sessions.cache_read_tokens + excluded.cache_read_tokens,
-          cache_creation_tokens = sessions.cache_creation_tokens + excluded.cache_creation_tokens`
+          cache_creation_tokens = sessions.cache_creation_tokens + excluded.cache_creation_tokens,
+          -- An upload with no cost must not wipe what an earlier one reported.
+          cost_usd = CASE
+            WHEN excluded.cost_usd IS NULL THEN sessions.cost_usd
+            ELSE COALESCE(sessions.cost_usd, 0) + excluded.cost_usd
+          END`
       )
       .bind(
         sessionId,
@@ -167,7 +193,8 @@ export async function upsertSessionAndEvents(
         d(session.input_tokens, prev?.input_tokens),
         d(session.output_tokens, prev?.output_tokens),
         d(session.cache_read_tokens, prev?.cache_read_tokens),
-        d(session.cache_creation_tokens, prev?.cache_creation_tokens)
+        d(session.cache_creation_tokens, prev?.cache_creation_tokens),
+        reportedCost == null ? null : d(reportedCost, prev?.cost_usd)
       )
   );
 
@@ -245,6 +272,10 @@ type SumsRow = {
   output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  cost_usd: number;
+  /** 1 when the group's rows carry no reported cost (grouped on, so a group is
+   *  never a mix of reported and unreported rows). */
+  cost_unreported: number;
 };
 type SessionCountRow = { user_id: number; repo_name: string; session_count: number };
 type ToolDailyRow = { day: string; kind: ToolKind; name: string; count: number };
@@ -264,6 +295,7 @@ type SessionRow = {
   output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  cost_usd: number | null;
 };
 
 const rows = <T>(r: D1Result): T[] => r.results as T[];
@@ -326,10 +358,12 @@ export async function getDashboardData(
           SUM(input_tokens) AS input_tokens,
           SUM(output_tokens) AS output_tokens,
           SUM(cache_read_tokens) AS cache_read_tokens,
-          SUM(cache_creation_tokens) AS cache_creation_tokens
+          SUM(cache_creation_tokens) AS cache_creation_tokens,
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          cost_usd IS NULL AS cost_unreported
         FROM ${sessionsFrom(true)}
         ${full.where}
-        GROUP BY day, user_id, model`
+        GROUP BY day, user_id, model, cost_usd IS NULL`
       )
       .bind(...full.params),
     db
@@ -364,7 +398,8 @@ export async function getDashboardData(
       .prepare(
         `SELECT session_id, day, user_id, repo_name, model, first_event_at, last_event_at,
           conversation_turns, skill_call_count, mcp_call_count, subagent_call_count,
-          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+          cost_usd
         FROM sessions
         WHERE session_id IN (
           SELECT session_id FROM ${sessionsFrom(true)}
@@ -394,9 +429,13 @@ export async function getDashboardData(
   const costByUser = new Map<number, number>();
   const dailyMap = new Map<string, DailyTrendEntry>();
   for (const r of rows<SumsRow>(sumsRes)) {
-    const cost = calculateEstimatedCost(
-      r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
-    );
+    // Rows Claude Code priced itself are already summed per model; the rest
+    // fall back to the pricing table at the group's single model rate.
+    const cost = r.cost_unreported
+      ? calculateEstimatedCost(
+          r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
+        )
+      : r.cost_usd;
     const tokens = r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens;
 
     kpi.total_conversation_turns += r.conversation_turns;
@@ -485,6 +524,13 @@ export async function getDashboardData(
     if (list) list.push(r);
     else bySession.set(r.session_id, [r]);
   }
+  // Per day-row, so a session whose rows are partly reported adds up correctly
+  // and the fallback uses that day's own model rather than the latest one.
+  const rowCost = (r: SessionRow) =>
+    r.cost_usd ??
+    calculateEstimatedCost(
+      r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
+    );
   const durationSeconds = (first: string, last: string) => {
     const ms = Date.parse(last) - Date.parse(first);
     return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
@@ -514,22 +560,14 @@ export async function getDashboardData(
         output_tokens,
         cache_read_tokens,
         cache_creation_tokens,
-        estimated_cost_usd: calculateEstimatedCost(
-          latest.model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-        ),
+        estimated_cost_usd: sum(rowCost),
         latest_conversation_turns: latest.conversation_turns,
         latest_skill_call_count: latest.skill_call_count,
         latest_mcp_call_count: latest.mcp_call_count,
         latest_subagent_call_count: latest.subagent_call_count,
         latest_total_tokens:
           latest.input_tokens + latest.output_tokens + latest.cache_read_tokens + latest.cache_creation_tokens,
-        latest_estimated_cost_usd: calculateEstimatedCost(
-          latest.model,
-          latest.input_tokens,
-          latest.output_tokens,
-          latest.cache_read_tokens,
-          latest.cache_creation_tokens
-        ),
+        latest_estimated_cost_usd: rowCost(latest),
         last_event_at,
       };
     })

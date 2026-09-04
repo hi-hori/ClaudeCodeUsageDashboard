@@ -124,6 +124,8 @@ wrangler d1 migrations apply claude-code-usage-dashboard-v2 --remote
 
 > Migration `0002_rollup_schema.sql` rebuilds the schema to reduce D1 `rows_read`, and the result is **not compatible with the pre-0002 Worker**. Because of that, the database name changed to `claude-code-usage-dashboard-v2`: create a new D1 database under that name instead of applying 0002 to the old `claude-code-usage-dashboard`. The old database is left untouched so it can be kept as a fallback (or deleted once the new one is verified), and the new dashboard starts empty.
 
+> Migration `0003_session_reported_cost.sql` adds a nullable `cost_usd` column to `sessions`. It only adds a column, so existing data is kept and no new database is needed. Sessions ingested before it stay `NULL` and keep being priced from `app/lib/cost.ts`.
+
 > For local environments, use the `--local` flag.
 
 ## DB Reset (Delete all data + recreate schema)
