@@ -19,6 +19,12 @@ export const CHART_HEIGHT_LARGE = 350;
 export const ESTIMATED_COST_HINT =
   "Estimated from token counts using the built-in pricing table, because Claude Code reported no cost for these sessions.";
 
+/** Shown on a cost that is partly reported, partly estimated: Claude Code
+ *  reported the cost when the session last ended, and the tokens added since
+ *  it was resumed are priced from the table until it ends again. */
+export const PARTLY_ESTIMATED_COST_HINT =
+  "Cost reported by Claude Code when this session last ended, plus an estimate from the built-in pricing table for the tokens added since it was resumed.";
+
 // --- Date formatting ---
 /** Slice index to extract "MM-DD" from "YYYY-MM-DD" */
 export const DATE_MM_DD_SLICE_START = 5;

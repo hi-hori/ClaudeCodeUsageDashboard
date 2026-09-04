@@ -1,4 +1,5 @@
 import type {
+  CostSource,
   IngestPayload,
   KpiData,
   UserRankingEntry,
@@ -570,7 +571,16 @@ export async function getDashboardData(
           r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
         )
       : r.cost_usd + r.uncosted_cost_usd;
-  const rowIsEstimated = (r: SessionRow) => r.cost_usd == null || r.uncosted_cost_usd > 0;
+  const rowCostSource = (r: SessionRow): CostSource =>
+    r.cost_usd == null ? "estimated" : r.uncosted_cost_usd > 0 ? "partly_estimated" : "reported";
+  // A session is "reported" or "estimated" only when every day-row is; any mix
+  // (a resumed session, or rows from before a cost was first reported) is
+  // partly estimated.
+  const sessionCostSource = (dayRows: SessionRow[]): CostSource => {
+    const sources = new Set(dayRows.map(rowCostSource));
+    if (sources.size === 1) return dayRows.length > 0 ? rowCostSource(dayRows[0]) : "reported";
+    return "partly_estimated";
+  };
   const durationSeconds = (first: string, last: string) => {
     const ms = Date.parse(last) - Date.parse(first);
     return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
@@ -601,7 +611,7 @@ export async function getDashboardData(
         cache_read_tokens,
         cache_creation_tokens,
         estimated_cost_usd: sum(rowCost),
-        cost_is_estimated: dayRows.some(rowIsEstimated),
+        cost_source: sessionCostSource(dayRows),
         latest_conversation_turns: latest.conversation_turns,
         latest_skill_call_count: latest.skill_call_count,
         latest_mcp_call_count: latest.mcp_call_count,
@@ -609,7 +619,7 @@ export async function getDashboardData(
         latest_total_tokens:
           latest.input_tokens + latest.output_tokens + latest.cache_read_tokens + latest.cache_creation_tokens,
         latest_estimated_cost_usd: rowCost(latest),
-        latest_cost_is_estimated: rowIsEstimated(latest),
+        latest_cost_source: rowCostSource(latest),
         last_event_at,
       };
     })
