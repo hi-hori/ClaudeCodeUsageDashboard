@@ -62,6 +62,9 @@ type SessionTotalsRow = {
   subagent_call_count: number;
   conversation_turns: number;
   cost_usd: number;
+  /** Day-rows whose cost_usd is non-NULL, i.e. whether the session has ever
+   *  reported a cost. */
+  cost_reported_rows: number;
 };
 
 type ToolCountRow = { day: string; kind: ToolKind; name: string; call_count: number };
@@ -99,7 +102,8 @@ export async function upsertSessionAndEvents(
           COALESCE(SUM(mcp_call_count), 0) AS mcp_call_count,
           COALESCE(SUM(subagent_call_count), 0) AS subagent_call_count,
           COALESCE(SUM(conversation_turns), 0) AS conversation_turns,
-          COALESCE(SUM(cost_usd), 0) AS cost_usd
+          COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COUNT(cost_usd) AS cost_reported_rows
         FROM sessions
         WHERE session_id = ?`
       )
@@ -120,23 +124,45 @@ export async function upsertSessionAndEvents(
 
   const statements: D1PreparedStatement[] = [];
 
+  const dInput = d(session.input_tokens, prev?.input_tokens);
+  const dOutput = d(session.output_tokens, prev?.output_tokens);
+  const dCacheRead = d(session.cache_read_tokens, prev?.cache_read_tokens);
+  const dCacheCreation = d(session.cache_creation_tokens, prev?.cache_creation_tokens);
+
   // A reported cost is cumulative for the whole session, so once one arrives
   // every day-row must be priced from it. Rows still holding NULL (uploaded
   // before the hook reported cost, or while Claude Code tracked none) would
   // otherwise keep falling back to the pricing table and be counted twice on
   // top of the full cumulative total credited below. Zero them first — the
   // delta is measured against the same COALESCEd sum, so nothing is lost.
+  // Estimates accumulated in uncosted_cost_usd while the session was resumed
+  // are superseded the same way: the new total covers those tokens exactly.
   const reportedCost = session.estimated_cost_usd;
   if (reportedCost != null) {
     statements.push(
       db
         .prepare(
-          `UPDATE sessions SET cost_usd = 0
-          WHERE session_id = ? AND cost_usd IS NULL`
+          `UPDATE sessions SET cost_usd = COALESCE(cost_usd, 0), uncosted_cost_usd = 0
+          WHERE session_id = ?`
         )
         .bind(sessionId)
     );
   }
+
+  // No reported cost in this upload. Claude Code only reports cost when a
+  // session ends, so for a session that has already reported one this is a
+  // resumed session mid-flight: its earlier tokens are priced exactly and the
+  // new ones not at all. Price the increment with the pricing table so the
+  // dashboard keeps moving, and store it separately so it is shown as an
+  // estimate and can be replaced when the next reported cost arrives. A
+  // session that has never reported a cost keeps cost_usd NULL and is priced
+  // at display time as before.
+  const sessionHasReportedCost = (prev?.cost_reported_rows ?? 0) > 0;
+  const priceIncrement = reportedCost == null && sessionHasReportedCost;
+  const costDelta = reportedCost != null ? d(reportedCost, prev?.cost_usd) : priceIncrement ? 0 : null;
+  const uncostedDelta = priceIncrement
+    ? calculateEstimatedCost(session.model, dInput, dOutput, dCacheRead, dCacheCreation)
+    : 0;
 
   // Add this upload's deltas to the day's row (created on first sight of the
   // day). Additive columns accumulate; metadata reflects the latest upload, and
@@ -150,8 +176,8 @@ export async function upsertSessionAndEvents(
           claude_code_version, model, first_event_at, last_event_at,
           skill_call_count, mcp_call_count, subagent_call_count, conversation_turns,
           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-          cost_usd
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          cost_usd, uncosted_cost_usd
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id, day) DO UPDATE SET
           user_id = excluded.user_id,
           project_dir = excluded.project_dir,
@@ -173,7 +199,8 @@ export async function upsertSessionAndEvents(
           cost_usd = CASE
             WHEN excluded.cost_usd IS NULL THEN sessions.cost_usd
             ELSE COALESCE(sessions.cost_usd, 0) + excluded.cost_usd
-          END`
+          END,
+          uncosted_cost_usd = sessions.uncosted_cost_usd + excluded.uncosted_cost_usd`
       )
       .bind(
         sessionId,
@@ -190,11 +217,12 @@ export async function upsertSessionAndEvents(
         d(mcp_events.length, prev?.mcp_call_count),
         d(subagent_events.length, prev?.subagent_call_count),
         d(session.conversation_turns, prev?.conversation_turns),
-        d(session.input_tokens, prev?.input_tokens),
-        d(session.output_tokens, prev?.output_tokens),
-        d(session.cache_read_tokens, prev?.cache_read_tokens),
-        d(session.cache_creation_tokens, prev?.cache_creation_tokens),
-        reportedCost == null ? null : d(reportedCost, prev?.cost_usd)
+        dInput,
+        dOutput,
+        dCacheRead,
+        dCacheCreation,
+        costDelta,
+        uncostedDelta
       )
   );
 
@@ -273,6 +301,9 @@ type SumsRow = {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   cost_usd: number;
+  /** Pricing-table estimate for tokens a resumed session added after its last
+   *  reported cost; 0 unless the session is mid-resume. */
+  uncosted_cost_usd: number;
   /** 1 when the group's rows carry no reported cost (grouped on, so a group is
    *  never a mix of reported and unreported rows). */
   cost_unreported: number;
@@ -296,6 +327,7 @@ type SessionRow = {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   cost_usd: number | null;
+  uncosted_cost_usd: number;
 };
 
 const rows = <T>(r: D1Result): T[] => r.results as T[];
@@ -360,6 +392,7 @@ export async function getDashboardData(
           SUM(cache_read_tokens) AS cache_read_tokens,
           SUM(cache_creation_tokens) AS cache_creation_tokens,
           COALESCE(SUM(cost_usd), 0) AS cost_usd,
+          COALESCE(SUM(uncosted_cost_usd), 0) AS uncosted_cost_usd,
           cost_usd IS NULL AS cost_unreported
         FROM ${sessionsFrom(true)}
         ${full.where}
@@ -399,7 +432,7 @@ export async function getDashboardData(
         `SELECT session_id, day, user_id, repo_name, model, first_event_at, last_event_at,
           conversation_turns, skill_call_count, mcp_call_count, subagent_call_count,
           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-          cost_usd
+          cost_usd, uncosted_cost_usd
         FROM sessions
         WHERE session_id IN (
           SELECT session_id FROM ${sessionsFrom(true)}
@@ -431,12 +464,15 @@ export async function getDashboardData(
   const dailyMap = new Map<string, DailyTrendEntry>();
   for (const r of rows<SumsRow>(sumsRes)) {
     // Rows Claude Code priced itself are already summed per model; the rest
-    // fall back to the pricing table at the group's single model rate.
-    const cost = r.cost_unreported
+    // fall back to the pricing table at the group's single model rate. Tokens a
+    // resumed session added after its last reported cost were priced at ingest
+    // (uncosted_cost_usd) and count as estimated too.
+    const estimated = r.cost_unreported
       ? calculateEstimatedCost(
           r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
         )
-      : r.cost_usd;
+      : r.uncosted_cost_usd;
+    const cost = r.cost_unreported ? estimated : r.cost_usd + r.uncosted_cost_usd;
     const tokens = r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_creation_tokens;
 
     kpi.total_conversation_turns += r.conversation_turns;
@@ -445,7 +481,7 @@ export async function getDashboardData(
     kpi.total_subagent_calls += r.subagent_call_count;
     kpi.total_tokens += tokens;
     kpi.total_estimated_cost += cost;
-    if (r.cost_unreported) kpi.estimated_cost_portion += cost;
+    kpi.estimated_cost_portion += estimated;
 
     costByUser.set(r.user_id, (costByUser.get(r.user_id) ?? 0) + cost);
 
@@ -529,10 +565,12 @@ export async function getDashboardData(
   // Per day-row, so a session whose rows are partly reported adds up correctly
   // and the fallback uses that day's own model rather than the latest one.
   const rowCost = (r: SessionRow) =>
-    r.cost_usd ??
-    calculateEstimatedCost(
-      r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
-    );
+    r.cost_usd == null
+      ? calculateEstimatedCost(
+          r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens
+        )
+      : r.cost_usd + r.uncosted_cost_usd;
+  const rowIsEstimated = (r: SessionRow) => r.cost_usd == null || r.uncosted_cost_usd > 0;
   const durationSeconds = (first: string, last: string) => {
     const ms = Date.parse(last) - Date.parse(first);
     return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
@@ -563,7 +601,7 @@ export async function getDashboardData(
         cache_read_tokens,
         cache_creation_tokens,
         estimated_cost_usd: sum(rowCost),
-        cost_is_estimated: dayRows.some((r) => r.cost_usd == null),
+        cost_is_estimated: dayRows.some(rowIsEstimated),
         latest_conversation_turns: latest.conversation_turns,
         latest_skill_call_count: latest.skill_call_count,
         latest_mcp_call_count: latest.mcp_call_count,
@@ -571,7 +609,7 @@ export async function getDashboardData(
         latest_total_tokens:
           latest.input_tokens + latest.output_tokens + latest.cache_read_tokens + latest.cache_creation_tokens,
         latest_estimated_cost_usd: rowCost(latest),
-        latest_cost_is_estimated: latest.cost_usd == null,
+        latest_cost_is_estimated: rowIsEstimated(latest),
         last_event_at,
       };
     })

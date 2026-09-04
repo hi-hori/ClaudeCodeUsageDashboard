@@ -157,7 +157,7 @@ Every upload contains the cumulative totals of the whole session, and the ingest
 | MCP events | Server name, method name (e.g. `notion/notion-fetch`) |
 | Sub-agent events | Agent type (Explore, Plan, etc.) |
 
-> Estimated costs are not stored in the DB. They are calculated dynamically at display time using token counts, models, and a pricing table.
+> **Cost.** The hook sends the cost Claude Code itself reports for the session (the transcript's `cost-state` record, which is priced per model). Claude Code writes that record only when a session ends, so mid-session uploads carry no reported cost and the dashboard prices their tokens with its own pricing table, marked as *estimated*. When a session that has already reported a cost is resumed, the tokens it adds are likewise estimated (stored in `sessions.uncosted_cost_usd`) until the next session end replaces the estimate with the exact total.
 
 ### How the Hook Works
 

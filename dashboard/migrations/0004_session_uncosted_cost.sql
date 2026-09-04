@@ -1,0 +1,21 @@
+-- Keep a session's cost moving while it is resumed.
+--
+-- Why: Claude Code writes the cost it tracked (the transcript's cost-state
+-- record) only when a session ends. When that session is resumed, every
+-- mid-session upload until the next end carries new tokens but no newer
+-- reported cost. The hook now omits the stale figure, but the ingest API
+-- then had nowhere to put the cost of those tokens: sessions.cost_usd being
+-- non-NULL means "reported, exact", so the dashboard neither added an
+-- estimate nor moved the total until the session ended again.
+--
+-- Now: when an upload without a reported cost arrives for a session that
+-- already has one, the API prices the new tokens with its own table and adds
+-- that to uncosted_cost_usd (shown as an estimate, on top of cost_usd). The
+-- next reported cost covers the whole session, so it resets this column to 0
+-- for every day-row of the session and credits the exact increment instead.
+-- Like the other additive columns, the value stored here is only that day's
+-- increment; it is always 0 while cost_usd is NULL.
+--
+-- Additive change: no table is rebuilt and no data is dropped.
+
+ALTER TABLE sessions ADD COLUMN uncosted_cost_usd REAL NOT NULL DEFAULT 0;
