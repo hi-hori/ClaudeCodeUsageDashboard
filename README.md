@@ -24,10 +24,10 @@ Installing the plugin enables automatic data submission to the dashboard when a 
 
 ```bash
 # Register the marketplace (only registered locally, not published externally)
-claude plugin marketplace add https://github.com/AgenticSec/ClaudeCodeUsageDashboard.git
+claude plugin marketplace add https://github.com/hi-hori/ClaudeCodeUsageDashboard.git
 
 # Install the plugin (applies to all projects)
-claude plugin install claude-code-usage-dashboard-plugin@AgenticSec
+claude plugin install claude-code-usage-dashboard-plugin@hi-hori
 ```
 
 ### 2. Set environment variables
@@ -68,8 +68,8 @@ You can verify the setup completed successfully:
 `claude plugin install` is a no-op if the plugin is already installed. To pick up a new version, refresh the marketplace and run `update` (restart Claude Code afterwards).
 
 ```bash
-claude plugin marketplace update AgenticSec
-claude plugin update claude-code-usage-dashboard-plugin@AgenticSec
+claude plugin marketplace update hi-hori
+claude plugin update claude-code-usage-dashboard-plugin@hi-hori
 ```
 
 ### Uninstall
@@ -104,7 +104,7 @@ To test with a local clone of this repository instead of the remote:
 claude plugin marketplace add ./
 
 # Install the plugin
-claude plugin install claude-code-usage-dashboard-plugin@AgenticSec
+claude plugin install claude-code-usage-dashboard-plugin@hi-hori
 ```
 
 ## Architecture
