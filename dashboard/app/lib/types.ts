@@ -113,9 +113,11 @@ export interface RecentSessionEntry {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   estimated_cost_usd: number;
-  /** True when any of the session's day-rows had no cost reported by Claude
-   *  Code, so this figure is partly or wholly derived from token counts. */
-  cost_is_estimated: boolean;
+  /** Where the figure comes from: "reported" is the cost Claude Code reported,
+   *  "estimated" is derived entirely from token counts, "partly_estimated" is
+   *  a reported cost plus an estimate for tokens added after it (a resumed
+   *  session that has not ended again yet). */
+  cost_source: CostSource;
   // Portion consumed on the session's most recent activity day (the day shown
   // in last_event_at). Equals the totals for a single-day session. Duration has
   // no per-day breakdown (day-rows store the session-wide span), so it is not
@@ -126,9 +128,11 @@ export interface RecentSessionEntry {
   latest_subagent_call_count: number;
   latest_total_tokens: number;
   latest_estimated_cost_usd: number;
-  latest_cost_is_estimated: boolean;
+  latest_cost_source: CostSource;
   last_event_at: string;
 }
+
+export type CostSource = "reported" | "partly_estimated" | "estimated";
 
 export interface DashboardData {
   kpi: KpiData;

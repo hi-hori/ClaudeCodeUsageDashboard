@@ -1,7 +1,8 @@
 import { useSearchParams } from "react-router";
 import type { RecentSessionEntry } from "~/lib/types";
 import { formatTokens } from "~/lib/format";
-import { ESTIMATED_COST_HINT } from "~/lib/constants";
+import { ESTIMATED_COST_HINT, PARTLY_ESTIMATED_COST_HINT } from "~/lib/constants";
+import type { CostSource } from "~/lib/types";
 
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
@@ -25,6 +26,22 @@ function formatDate(isoString: string): string {
   });
 }
 
+// Cost figures are shaded by provenance: the cost Claude Code reported is
+// black like every other primary number, a figure derived entirely from token
+// counts is pale, and a reported cost with an estimate added on top (a
+// resumed session) sits in between.
+const COST_TONE: Record<CostSource, { className?: string; title?: string }> = {
+  reported: {},
+  partly_estimated: {
+    className: "text-gray-600 dark:text-gray-300",
+    title: PARTLY_ESTIMATED_COST_HINT,
+  },
+  estimated: {
+    className: "font-normal text-gray-400 dark:text-gray-500",
+    title: ESTIMATED_COST_HINT,
+  },
+};
+
 // Render a metric's running total with the most recent day's portion stacked
 // below as "+x". The total stays on its own right-aligned line (with tabular
 // figures) so the primary numbers line up cleanly down the column; the delta
@@ -35,20 +52,20 @@ function ValueWithDelta({
   total,
   latest,
   format = String,
-  dimmed = false,
+  className,
   title,
 }: {
   total: number;
   latest: number;
   format?: (n: number) => string;
-  /** Render the total in the muted colour used for derived figures. */
-  dimmed?: boolean;
+  /** Extra classes for the total, e.g. a provenance tone from COST_TONE. */
+  className?: string;
   title?: string;
 }) {
   const showDelta = latest > 0 && latest < total;
   return (
     <div className="flex flex-col items-end leading-tight tabular-nums" title={title}>
-      <span className={dimmed ? "font-normal text-gray-400 dark:text-gray-500" : undefined}>
+      <span className={className}>
         {format(total)}
       </span>
       {showDelta && (
@@ -166,8 +183,8 @@ export function RecentSessionsTable({
                       total={s.estimated_cost_usd}
                       latest={s.latest_estimated_cost_usd}
                       format={formatCost}
-                      dimmed={s.cost_is_estimated}
-                      title={s.cost_is_estimated ? ESTIMATED_COST_HINT : undefined}
+                      className={COST_TONE[s.cost_source].className}
+                      title={COST_TONE[s.cost_source].title}
                     />
                   </td>
                 </tr>
