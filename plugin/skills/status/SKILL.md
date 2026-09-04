@@ -5,10 +5,10 @@ disable-model-invocation: true
 allowed-tools: Bash(*session-uploader.py*--status*)
 ---
 
-Check whether the Claude Code Usage Dashboard is enabled and will collect usage data when this session ends.
+Check whether the Claude Code Usage Dashboard is enabled and will collect usage data during this session and when it ends.
 
 ## Status output
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/hooks/session-uploader.py" --status`
 
-Present the status above to the user in a clear, readable format. If all checks pass (✓), usage data will be sent to the dashboard when the session ends. If any check fails (✗), explain what needs to be fixed.
+Present the status above to the user in a clear, readable format. If all checks pass (✓), usage data will be sent to the dashboard periodically during the session and when it ends (the status output states the interval). If any check fails (✗), explain what needs to be fixed.

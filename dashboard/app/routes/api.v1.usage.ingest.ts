@@ -49,7 +49,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     // Upsert user
     const userId = await upsertUser(db, payload.email);
 
-    // SessionEnd hook may re-fire on retries — upsert keeps the latest snapshot.
+    // The hook uploads the cumulative snapshot repeatedly (mid-session via the
+    // Stop hook, then at SessionEnd) — upsert credits only the increment.
     const result = await upsertSessionAndEvents(db, userId, payload);
 
     return Response.json({
