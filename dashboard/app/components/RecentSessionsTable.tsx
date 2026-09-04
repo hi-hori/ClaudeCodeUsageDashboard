@@ -34,7 +34,7 @@ function formatDate(isoString: string): string {
 const COST_TONE: Record<CostSource, { className?: string; title?: string }> = {
   reported: {},
   partly_estimated: {
-    className: "text-gray-500 dark:text-gray-400",
+    className: "text-gray-500 dark:text-gray-500",
     title: PARTLY_ESTIMATED_COST_HINT,
   },
   estimated: {
