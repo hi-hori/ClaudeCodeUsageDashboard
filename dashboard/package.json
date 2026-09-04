@@ -22,12 +22,12 @@
     "isbot": "^5.1.31",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-router": "7.12.0",
+    "react-router": "7.18.3",
     "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260903.1",
-    "@react-router/dev": "7.12.0",
+    "@react-router/dev": "7.18.3",
     "@tailwindcss/vite": "^4.1.13",
     "@types/node": "^25.0.9",
     "@types/react": "^19.2.7",
