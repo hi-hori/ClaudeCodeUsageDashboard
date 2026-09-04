@@ -425,6 +425,7 @@ export async function getDashboardData(
     total_subagent_calls: 0,
     total_tokens: 0,
     total_estimated_cost: 0,
+    estimated_cost_portion: 0,
   };
   const costByUser = new Map<number, number>();
   const dailyMap = new Map<string, DailyTrendEntry>();
@@ -444,6 +445,7 @@ export async function getDashboardData(
     kpi.total_subagent_calls += r.subagent_call_count;
     kpi.total_tokens += tokens;
     kpi.total_estimated_cost += cost;
+    if (r.cost_unreported) kpi.estimated_cost_portion += cost;
 
     costByUser.set(r.user_id, (costByUser.get(r.user_id) ?? 0) + cost);
 
@@ -561,6 +563,7 @@ export async function getDashboardData(
         cache_read_tokens,
         cache_creation_tokens,
         estimated_cost_usd: sum(rowCost),
+        cost_is_estimated: dayRows.some((r) => r.cost_usd == null),
         latest_conversation_turns: latest.conversation_turns,
         latest_skill_call_count: latest.skill_call_count,
         latest_mcp_call_count: latest.mcp_call_count,
@@ -568,6 +571,7 @@ export async function getDashboardData(
         latest_total_tokens:
           latest.input_tokens + latest.output_tokens + latest.cache_read_tokens + latest.cache_creation_tokens,
         latest_estimated_cost_usd: rowCost(latest),
+        latest_cost_is_estimated: latest.cost_usd == null,
         last_event_at,
       };
     })

@@ -52,6 +52,9 @@ export interface KpiData {
   total_mcp_calls: number;
   total_subagent_calls: number;
   total_estimated_cost: number;
+  /** Part of total_estimated_cost that came from the pricing table rather than
+   *  from a cost Claude Code reported. 0 when every session reported one. */
+  estimated_cost_portion: number;
   total_tokens: number;
 }
 
@@ -110,6 +113,9 @@ export interface RecentSessionEntry {
   cache_read_tokens: number;
   cache_creation_tokens: number;
   estimated_cost_usd: number;
+  /** True when any of the session's day-rows had no cost reported by Claude
+   *  Code, so this figure is partly or wholly derived from token counts. */
+  cost_is_estimated: boolean;
   // Portion consumed on the session's most recent activity day (the day shown
   // in last_event_at). Equals the totals for a single-day session. Duration has
   // no per-day breakdown (day-rows store the session-wide span), so it is not
@@ -120,6 +126,7 @@ export interface RecentSessionEntry {
   latest_subagent_call_count: number;
   latest_total_tokens: number;
   latest_estimated_cost_usd: number;
+  latest_cost_is_estimated: boolean;
   last_event_at: string;
 }
 

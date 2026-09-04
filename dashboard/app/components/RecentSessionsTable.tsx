@@ -1,6 +1,7 @@
 import { useSearchParams } from "react-router";
 import type { RecentSessionEntry } from "~/lib/types";
 import { formatTokens } from "~/lib/format";
+import { ESTIMATED_COST_HINT } from "~/lib/constants";
 
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
@@ -34,15 +35,22 @@ function ValueWithDelta({
   total,
   latest,
   format = String,
+  dimmed = false,
+  title,
 }: {
   total: number;
   latest: number;
   format?: (n: number) => string;
+  /** Render the total in the muted colour used for derived figures. */
+  dimmed?: boolean;
+  title?: string;
 }) {
   const showDelta = latest > 0 && latest < total;
   return (
-    <div className="flex flex-col items-end leading-tight tabular-nums">
-      <span>{format(total)}</span>
+    <div className="flex flex-col items-end leading-tight tabular-nums" title={title}>
+      <span className={dimmed ? "font-normal text-gray-400 dark:text-gray-500" : undefined}>
+        {format(total)}
+      </span>
       {showDelta && (
         <span className="text-xs font-normal text-gray-400 dark:text-gray-500">
           +{format(latest)}
@@ -154,7 +162,13 @@ export function RecentSessionsTable({
                     <ValueWithDelta total={totalTokens} latest={s.latest_total_tokens} format={formatTokens} />
                   </td>
                   <td className="py-2 px-2 align-top text-right font-medium text-gray-900 dark:text-gray-100">
-                    <ValueWithDelta total={s.estimated_cost_usd} latest={s.latest_estimated_cost_usd} format={formatCost} />
+                    <ValueWithDelta
+                      total={s.estimated_cost_usd}
+                      latest={s.latest_estimated_cost_usd}
+                      format={formatCost}
+                      dimmed={s.cost_is_estimated}
+                      title={s.cost_is_estimated ? ESTIMATED_COST_HINT : undefined}
+                    />
                   </td>
                 </tr>
               );
