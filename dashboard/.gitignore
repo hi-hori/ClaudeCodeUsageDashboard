@@ -10,3 +10,6 @@
 # Cloudflare
 .wrangler/
 .dev.vars
+
+# Throwaway local D1 state used by scripts/measure
+/.wrangler-verify/

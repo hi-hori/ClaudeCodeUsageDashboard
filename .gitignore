@@ -12,3 +12,7 @@ build/
 # Cloudflare
 .wrangler/
 .dev.vars
+
+# D1 export / migration output (contains real usage data -- never commit)
+/backup-*.sql
+/v1-to-v2/

@@ -32,5 +32,5 @@ echo ""
 echo "Deploying..."
 cd dashboard
 npm install
-npx wrangler d1 migrations apply claude-code-usage-dashboard --remote
+npx wrangler d1 migrations apply claude-code-usage-dashboard-v2 --remote
 npm run deploy

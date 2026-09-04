@@ -1,0 +1,14 @@
+# Throwaway Worker used to measure D1 rows_read for one dashboard load.
+# Not part of the deployment; see README.md for how to run it.
+name = "d1-rows-read-measure"
+main = "./measure.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Same binding and database as the dashboard, so getDashboardData() runs
+# unchanged. Point --persist-to at a throwaway directory to keep the normal
+# local state in .wrangler/ untouched.
+[[d1_databases]]
+binding = "DB"
+database_name = "claude-code-usage-dashboard-v2"
+database_id = "tobe-replaced-by-deploy.sh"

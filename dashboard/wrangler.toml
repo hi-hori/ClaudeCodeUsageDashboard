@@ -6,6 +6,6 @@ assets = { directory = "./build/client" }
 
 [[d1_databases]]
 binding = "DB"
-database_name = "claude-code-usage-dashboard"
+database_name = "claude-code-usage-dashboard-v2"
 database_id = "tobe-replaced-by-deploy.sh"
 migrations_dir = "migrations"

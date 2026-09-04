@@ -87,7 +87,7 @@ cd dashboard
 npm install
 
 # Apply migrations to local D1
-npx wrangler d1 migrations apply claude-code-usage-dashboard --local
+npx wrangler d1 migrations apply claude-code-usage-dashboard-v2 --local
 
 # Start the dev server
 npm run dev
