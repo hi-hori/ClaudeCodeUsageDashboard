@@ -26,18 +26,19 @@ function formatDate(isoString: string): string {
   });
 }
 
-// Cost figures are shaded by provenance: the cost Claude Code reported is
-// black like every other primary number, a figure derived entirely from token
-// counts is pale, and a reported cost with an estimate added on top (a
-// resumed session) sits in between.
+// Cost figures are shaded by provenance: the cost Claude Code reported uses
+// the same colour as the neighbouring Token column, a figure derived entirely
+// from token counts is pale, and a reported cost with an estimate added on top
+// (a resumed session) sits in between. Only the colour changes; weight stays
+// the same.
 const COST_TONE: Record<CostSource, { className?: string; title?: string }> = {
   reported: {},
   partly_estimated: {
-    className: "text-gray-600 dark:text-gray-300",
+    className: "text-gray-500 dark:text-gray-400",
     title: PARTLY_ESTIMATED_COST_HINT,
   },
   estimated: {
-    className: "font-normal text-gray-400 dark:text-gray-500",
+    className: "text-gray-300 dark:text-gray-600",
     title: ESTIMATED_COST_HINT,
   },
 };
@@ -178,7 +179,7 @@ export function RecentSessionsTable({
                   <td className="py-2 px-2 align-top text-right text-gray-600 dark:text-gray-400">
                     <ValueWithDelta total={totalTokens} latest={s.latest_total_tokens} format={formatTokens} />
                   </td>
-                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
+                  <td className="py-2 px-2 align-top text-right text-gray-600 dark:text-gray-400">
                     <ValueWithDelta
                       total={s.estimated_cost_usd}
                       latest={s.latest_estimated_cost_usd}
