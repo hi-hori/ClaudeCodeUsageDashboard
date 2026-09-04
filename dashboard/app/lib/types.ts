@@ -13,6 +13,9 @@ export interface SessionData {
   output_tokens: number;
   cache_read_tokens: number;
   cache_creation_tokens: number;
+  /** Cost reported by Claude Code, cumulative for the session. Absent when it
+   *  tracked none, so the dashboard prices the tokens itself. */
+  estimated_cost_usd?: number | null;
 }
 
 export interface SkillEvent {

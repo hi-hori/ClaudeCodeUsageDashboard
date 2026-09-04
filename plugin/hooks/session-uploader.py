@@ -363,6 +363,29 @@ def parse_transcript(records):
         cache_read_tokens += usage.get("cache_read_input_tokens", 0)
         cache_creation_tokens += usage.get("cache_creation_input_tokens", 0)
 
+    # Cost as reported by Claude Code (cumulative snapshot, last one wins).
+    # Preferred over deriving it from tokens because a session usually mixes
+    # models (a Haiku subagent under Opus) and only this breakdown prices each
+    # one at its own rate.
+    #
+    # Trusted only when modelUsage is populated and every model in it was
+    # priced: an empty modelUsage means Claude Code tracked no cost for this
+    # session (seen with totalCostUSD 0 alongside millions of tokens), and
+    # hasUnknownModelCost means the total omits a model it could not price.
+    # In both cases the field is left out and the dashboard falls back to its
+    # own pricing table.
+    estimated_cost_usd = None
+    for rec in records:
+        if rec.get("type") != "cost-state":
+            continue
+        total = rec.get("totalCostUSD")
+        usable = (
+            isinstance(total, (int, float))
+            and rec.get("modelUsage")
+            and not rec.get("hasUnknownModelCost")
+        )
+        estimated_cost_usd = float(total) if usable else None
+
     # Model: most frequent
     model_counter = Counter(
         msg.get("model", "unknown") for msg in messages_by_id.values()
@@ -395,6 +418,7 @@ def parse_transcript(records):
             "output_tokens": output_tokens,
             "cache_read_tokens": cache_read_tokens,
             "cache_creation_tokens": cache_creation_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
         },
         "skill_events": skill_events,
         "mcp_events": mcp_events,
