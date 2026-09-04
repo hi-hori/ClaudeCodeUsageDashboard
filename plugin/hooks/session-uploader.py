@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Claude Code SessionEnd hook: parse transcript and upload usage data to dashboard.
+"""Claude Code Stop / SessionEnd hook: parse transcript and upload usage data to dashboard.
+
+Registered for two hook events (see hooks.json):
+
+  Stop        fires after every assistant turn and runs async, so it must stay
+              cheap: it uploads at most once per UPLOAD_INTERVAL seconds per
+              session and returns without doing anything in between.
+  SessionEnd  always uploads, so the final snapshot lands even when the
+              throttle window has not elapsed.
+
+Each upload is the cumulative snapshot of the whole transcript; the ingest API
+credits only the increment since the previous upload, so re-sending is safe.
+A per-session lock file keeps an async Stop upload and the SessionEnd upload
+from racing each other (two concurrent snapshots would both be credited in
+full).
 
 This is a standalone CLI script for external API communication.
 JSON serialization is required for HTTP POST to the dashboard ingest API.
@@ -17,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from urllib.parse import urljoin
@@ -46,6 +61,20 @@ BUILTIN_COMMANDS = frozenset(
 )
 
 
+CONFIG_DIR = Path.home() / ".claude-code-usage-dashboard"
+CONFIG_PATH = CONFIG_DIR / "env"
+STATE_DIR = CONFIG_DIR / "state"
+
+# Minimum seconds between two uploads of the same session triggered by Stop.
+DEFAULT_UPLOAD_INTERVAL = 300
+# A lock older than this is assumed to belong to a crashed uploader.
+LOCK_STALE_SECONDS = 120
+# How long SessionEnd waits for an in-flight Stop upload before proceeding.
+LOCK_WAIT_SECONDS = 30
+# Throttle markers of sessions that never reported SessionEnd are swept after this.
+MARKER_MAX_AGE_SECONDS = 7 * 24 * 3600
+
+
 def read_plugin_version() -> str | None:
     manifest = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
     try:
@@ -56,7 +85,7 @@ def read_plugin_version() -> str | None:
 
 def run_status_check() -> None:
     """Print status of dashboard configuration for the current process."""
-    config_path = Path.home() / ".claude-code-usage-dashboard" / "env"
+    config_path = CONFIG_PATH
     load_dotenv(str(config_path))
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
@@ -64,6 +93,7 @@ def run_status_check() -> None:
         "CLAUDE_CODE_USAGE_DASHBOARD_URL", "http://localhost:5173"
     )
     allowed_dirs = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_ALLOWED_DIRS", "")
+    interval = get_upload_interval()
 
     lines = ["Claude Code Usage Dashboard — Status", "=" * 40, ""]
 
@@ -111,7 +141,16 @@ def run_status_check() -> None:
         ]
     )
     if enabled:
-        lines.append("→ Usage data will be sent to the dashboard when this session ends.")
+        if interval > 0:
+            lines.append(
+                "→ Usage data will be sent to the dashboard during this session "
+                f"(at most every {format_interval(interval)}) and when it ends."
+            )
+        else:
+            lines.append(
+                "→ Usage data will be sent to the dashboard after every turn "
+                "and when this session ends."
+            )
     else:
         lines.append("→ Fix the issues above for usage data to be collected.")
 
@@ -127,17 +166,10 @@ def main() -> None:
     session_id = session_info.get("session_id")
     if not session_id:
         return
+    # Anything other than SessionEnd (i.e. Stop) is a mid-session upload.
+    is_final = session_info.get("hook_event_name") == "SessionEnd"
 
-    transcript_path = find_transcript(session_id)
-    if not transcript_path:
-        return
-
-    email = get_email()
-    if not email:
-        return
-
-    config_path = Path.home() / ".claude-code-usage-dashboard" / "env"
-    load_dotenv(str(config_path))
+    load_dotenv(str(CONFIG_PATH))
 
     project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     if not is_allowed_dir(project_dir):
@@ -149,13 +181,147 @@ def main() -> None:
     if not dashboard_url:
         return
 
-    records = read_jsonl(transcript_path)
-    payload = parse_transcript(records)
-    if not payload:
+    # Cheap checks first: Stop fires after every turn, and most of those runs
+    # must exit here without spawning `claude auth status` or reading the
+    # transcript.
+    if not is_final and not throttle_allows(session_id):
         return
 
-    payload["email"] = email
-    post_to_api(dashboard_url, payload)
+    lock = acquire_lock(session_id, wait=is_final)
+    if lock is None:
+        return
+    try:
+        # Stop hooks are async; the throttle window is measured from when the
+        # upload started so a slow request cannot let the next turn pile on.
+        touch_marker(session_id)
+
+        transcript_path = session_info.get("transcript_path")
+        if not transcript_path or not os.path.isfile(transcript_path):
+            transcript_path = find_transcript(session_id)
+        if not transcript_path:
+            return
+
+        email = get_email()
+        if not email:
+            return
+
+        records = read_jsonl(transcript_path)
+        payload = parse_transcript(records)
+        if not payload:
+            return
+
+        payload["email"] = email
+        post_to_api(dashboard_url, payload)
+
+        if is_final:
+            remove_marker(session_id)
+            sweep_stale_markers()
+    finally:
+        release_lock(lock)
+
+
+def get_upload_interval() -> int:
+    """Seconds between mid-session uploads; 0 uploads after every turn."""
+    raw = os.environ.get("CLAUDE_CODE_USAGE_DASHBOARD_UPLOAD_INTERVAL", "")
+    try:
+        return max(0, int(raw)) if raw.strip() else DEFAULT_UPLOAD_INTERVAL
+    except ValueError:
+        return DEFAULT_UPLOAD_INTERVAL
+
+
+def format_interval(seconds: int) -> str:
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600} h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60} min"
+    return f"{seconds} s"
+
+
+def _marker_path(session_id: str) -> Path:
+    return STATE_DIR / f"{session_id}.last-upload"
+
+
+def _lock_path(session_id: str) -> Path:
+    return STATE_DIR / f"{session_id}.lock"
+
+
+def throttle_allows(session_id: str) -> bool:
+    """True when the last mid-session upload is old enough (or there was none)."""
+    interval = get_upload_interval()
+    if interval <= 0:
+        return True
+    try:
+        last = _marker_path(session_id).stat().st_mtime
+    except OSError:
+        return True
+    return time.time() - last >= interval
+
+
+def touch_marker(session_id: str) -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        _marker_path(session_id).touch()
+    except OSError:
+        pass
+
+
+def remove_marker(session_id: str) -> None:
+    try:
+        _marker_path(session_id).unlink()
+    except OSError:
+        pass
+
+
+def sweep_stale_markers() -> None:
+    """Drop markers left by sessions that were killed without a SessionEnd."""
+    cutoff = time.time() - MARKER_MAX_AGE_SECONDS
+    try:
+        for path in STATE_DIR.glob("*.last-upload"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
+def acquire_lock(session_id: str, wait: bool):
+    """Create the per-session lock file exclusively.
+
+    Returns the lock path, or None when another uploader holds it. A Stop
+    upload gives up immediately (the next turn will try again); SessionEnd
+    waits for the in-flight upload so the final snapshot is never skipped, and
+    takes over a lock that looks abandoned.
+    """
+    lock = _lock_path(session_id)
+    deadline = time.time() + (LOCK_WAIT_SECONDS if wait else 0)
+    while True:
+        try:
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return lock
+        except FileExistsError:
+            try:
+                stale = time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS
+            except OSError:
+                stale = False  # Released between the open and the stat; retry.
+            if stale:
+                release_lock(lock)
+                continue
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.5)
+        except OSError:
+            return None
+
+
+def release_lock(lock) -> None:
+    try:
+        lock.unlink()
+    except OSError:
+        pass
 
 
 def _get_claude_config_dir() -> Path:
@@ -215,16 +381,67 @@ def is_allowed_dir(project_dir: str) -> bool:
     return any(fnmatch.fnmatch(project_dir, pat.rstrip("/")) for pat in patterns)
 
 
+def _open_transcript_bytes(path):
+    """Open the transcript for reading without getting in Claude Code's way.
+
+    Claude Code keeps appending to the transcript while this hook runs (Stop
+    fires mid-session). On Windows, Python's default open() shares read and
+    write access but not delete, so for as long as the file is open Claude Code
+    could not rename or delete it. Open it through CreateFileW with
+    FILE_SHARE_DELETE as well so every operation stays possible; fall back to
+    a plain open() if that fails for any reason.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            GENERIC_READ = 0x80000000
+            FILE_SHARE_READ = 0x1
+            FILE_SHARE_WRITE = 0x2
+            FILE_SHARE_DELETE = 0x4
+            OPEN_EXISTING = 3
+            FILE_ATTRIBUTE_NORMAL = 0x80
+            INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CreateFileW.restype = wintypes.HANDLE
+            kernel32.CreateFileW.argtypes = [
+                wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+            ]
+            handle = kernel32.CreateFileW(
+                str(path), GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None,
+            )
+            if handle != INVALID_HANDLE_VALUE:
+                # open_osfhandle takes ownership of the handle; closing the
+                # file object closes it.
+                fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+                return os.fdopen(fd, "rb")
+        except Exception:
+            pass
+    return open(path, "rb")
+
+
 def read_jsonl(path):
+    # Read everything in one go to keep the file open as briefly as possible,
+    # then parse. The transcript is UTF-8 regardless of the OS locale (on
+    # Windows without PYTHONUTF8 a text-mode open() would decode as cp932 and
+    # raise on the first multi-byte character). A line still being appended
+    # by Claude Code fails to parse and is skipped; the next upload picks it up.
+    with _open_transcript_bytes(path) as f:
+        text = f.read().decode("utf-8", errors="replace")
     records = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
     return records
 
 
