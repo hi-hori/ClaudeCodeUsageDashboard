@@ -178,7 +178,7 @@ export function RecentSessionsTable({
                   <td className="py-2 px-2 align-top text-right text-gray-600 dark:text-gray-400">
                     <ValueWithDelta total={totalTokens} latest={s.latest_total_tokens} format={formatTokens} />
                   </td>
-                  <td className="py-2 px-2 align-top text-right font-medium text-gray-900 dark:text-gray-100">
+                  <td className="py-2 px-2 align-top text-right text-gray-900 dark:text-gray-100">
                     <ValueWithDelta
                       total={s.estimated_cost_usd}
                       latest={s.latest_estimated_cost_usd}
