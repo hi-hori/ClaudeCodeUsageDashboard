@@ -33,7 +33,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.13",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vite": "^7.1.7",
     "vite-tsconfig-paths": "^6.1.1",
     "wrangler": "^4.20.0"
