@@ -8,6 +8,20 @@ import { createRequestHandler } from "react-router";
 // @ts-expect-error - This will be bundled by wrangler
 import * as serverBuild from "../build/server/index.js";
 
+// The load context this worker builds below. React Router leaves
+// AppLoadContext empty, so without this augmentation routes see
+// context.cloudflare as unknown. @react-router/cloudflare declared the same
+// shape, but nothing imported it so the augmentation never loaded.
+declare module "react-router" {
+  interface AppLoadContext {
+    cloudflare: {
+      env: Env;
+      ctx: ExecutionContext;
+      caches: CacheStorage;
+    };
+  }
+}
+
 const requestHandler = createRequestHandler(serverBuild, "production");
 
 export default {
