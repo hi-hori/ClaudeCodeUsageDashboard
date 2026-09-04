@@ -591,17 +591,32 @@ def parse_transcript(records):
     # hasUnknownModelCost means the total omits a model it could not price.
     # In both cases the field is left out and the dashboard falls back to its
     # own pricing table.
+    #
+    # Claude Code writes cost-state only when a session ends. When a session is
+    # resumed, new assistant turns follow that record until the next end, so a
+    # cost-state with assistant records after it covers only part of the
+    # tokens in this snapshot. Sending it would freeze the session's cost at
+    # the old total (the ingest API credits the increment over the previous
+    # upload, which would be 0); leaving it out lets the API estimate the
+    # uncovered tokens instead, and the next end reports the exact total.
     estimated_cost_usd = None
-    for rec in records:
-        if rec.get("type") != "cost-state":
-            continue
-        total = rec.get("totalCostUSD")
-        usable = (
-            isinstance(total, (int, float))
-            and rec.get("modelUsage")
-            and not rec.get("hasUnknownModelCost")
-        )
-        estimated_cost_usd = float(total) if usable else None
+    last_cost_state_idx = -1
+    last_assistant_idx = -1
+    for idx, rec in enumerate(records):
+        rec_type = rec.get("type")
+        if rec_type == "assistant":
+            last_assistant_idx = idx
+        elif rec_type == "cost-state":
+            last_cost_state_idx = idx
+            total = rec.get("totalCostUSD")
+            usable = (
+                isinstance(total, (int, float))
+                and rec.get("modelUsage")
+                and not rec.get("hasUnknownModelCost")
+            )
+            estimated_cost_usd = float(total) if usable else None
+    if last_assistant_idx > last_cost_state_idx:
+        estimated_cost_usd = None
 
     # Model: most frequent
     model_counter = Counter(
