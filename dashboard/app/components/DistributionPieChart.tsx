@@ -1,4 +1,5 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import type { DistributionEntry } from "~/lib/types";
 import { CHART_HEIGHT } from "~/lib/constants";
 
@@ -15,6 +16,8 @@ const PIE_MIN_LABEL_PERCENT = 0.05;
 const PIE_LABEL_MAX_LENGTH = 8;
 const PIE_LABEL_FONT_SIZE = 11;
 
+// Recharts 3 marks midAngle, name and percent optional on the label render
+// props, so each is guarded before use.
 function renderInsideLabel({
   cx,
   cy,
@@ -23,20 +26,13 @@ function renderInsideLabel({
   outerRadius,
   name,
   percent,
-}: {
-  cx: number;
-  cy: number;
-  midAngle: number;
-  innerRadius: number;
-  outerRadius: number;
-  name: string;
-  percent: number;
-}) {
-  if (percent < PIE_MIN_LABEL_PERCENT) return null;
+}: PieLabelRenderProps) {
+  if (midAngle == null || percent == null || percent < PIE_MIN_LABEL_PERCENT) return null;
   const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
-  const label = name.length > PIE_LABEL_MAX_LENGTH ? name.slice(0, PIE_LABEL_MAX_LENGTH - 1) + "…" : name;
+  const text = String(name ?? "");
+  const label = text.length > PIE_LABEL_MAX_LENGTH ? text.slice(0, PIE_LABEL_MAX_LENGTH - 1) + "…" : text;
   return (
     <text
       x={x}
@@ -91,7 +87,7 @@ export function DistributionPieChart({ title, data }: DistributionPieChartProps)
             contentStyle={{ backgroundColor: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", color: "var(--tooltip-text)" }}
             labelStyle={{ color: "var(--tooltip-text)" }}
             itemStyle={{ color: "var(--tooltip-text)" }}
-            formatter={(value: number, name: string) => [`${value}`, name]}
+            formatter={(value, name) => [`${value}`, name]}
           />
           <Legend />
         </PieChart>

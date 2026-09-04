@@ -33,14 +33,18 @@ export function CostTokenTrendChart({ data }: { data: DailyTrendEntry[] }) {
     <ChartCard>
       <ResponsiveContainer width="100%" height={CHART_HEIGHT_LARGE}>
         <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" />
+          {/* Recharts 3 draws horizontal grid lines only for a matching yAxisId;
+              this chart has two Y axes, so the grid must name one. */}
+          <CartesianGrid strokeDasharray="3 3" yAxisId="tokens" />
           <XAxis dataKey="date" />
           <YAxis yAxisId="tokens" tickFormatter={formatTokens} orientation="left" />
           <YAxis yAxisId="cost" tickFormatter={(v) => `$${v.toFixed(0)}`} orientation="right" />
           <Tooltip
-            formatter={(value: number, name: string) => {
-              if (name === "Cost") return [`$${value.toFixed(2)}`, name];
-              return [formatTokens(value), name];
+            formatter={(value, name) => {
+              // Recharts 3 widened the value type; every series here is numeric.
+              const n = Number(value);
+              if (name === "Cost") return [`$${n.toFixed(2)}`, name];
+              return [formatTokens(n), name];
             }}
             contentStyle={{ backgroundColor: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", color: "var(--tooltip-text)" }}
             labelStyle={{ color: "var(--tooltip-text)" }}
