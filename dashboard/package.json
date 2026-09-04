@@ -29,13 +29,13 @@
     "@cloudflare/workers-types": "^5.20260903.1",
     "@react-router/dev": "7.18.3",
     "@tailwindcss/vite": "^4.1.13",
-    "@types/node": "^25.0.9",
+    "@types/node": "^26.4.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.2",
+    "typescript": "^7.0.2",
     "vite": "^7.1.7",
-    "vite-tsconfig-paths": "^5.1.4",
+    "vite-tsconfig-paths": "^6.1.1",
     "wrangler": "^4.20.0"
   }
 }
