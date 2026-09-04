@@ -7,6 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import type { BarRectangleItem, YAxisTickContentProps } from "recharts";
 import { useSearchParams } from "react-router";
 import type { UserRankingEntry } from "~/lib/types";
 import { CHART_HEIGHT } from "~/lib/constants";
@@ -29,7 +30,11 @@ export function UserRankingChart({ data }: { data: UserRankingEntry[] }) {
     return <EmptyState />;
   }
 
-  const handleBarClick = (entry: UserRankingEntry & { name: string }) => {
+  // Recharts 3 passes the drawn rectangle rather than the row; the row itself
+  // is carried on payload.
+  const handleBarClick = (bar: BarRectangleItem) => {
+    const entry = bar.payload as UserRankingEntry | undefined;
+    if (!entry) return;
     const newParams = new URLSearchParams(searchParams);
     newParams.set("user_id", String(entry.user_id));
     setSearchParams(newParams);
@@ -45,17 +50,18 @@ export function UserRankingChart({ data }: { data: UserRankingEntry[] }) {
             type="category"
             dataKey="name"
             width={Y_AXIS_LABEL_WIDTH}
-            tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
-              const label = payload.value.length > Y_AXIS_LABEL_MAX_LENGTH ? `${payload.value.slice(0, Y_AXIS_LABEL_MAX_LENGTH)}...` : payload.value;
+            tick={({ x, y, payload }: YAxisTickContentProps) => {
+              const value = String(payload.value ?? "");
+              const label = value.length > Y_AXIS_LABEL_MAX_LENGTH ? `${value.slice(0, Y_AXIS_LABEL_MAX_LENGTH)}...` : value;
               return (
-                <text x={x - (Y_AXIS_LABEL_WIDTH - 5)} y={y} dy={4} fontSize={Y_AXIS_LABEL_FONT_SIZE} textAnchor="start" fill="currentColor">
+                <text x={Number(x) - (Y_AXIS_LABEL_WIDTH - 5)} y={y} dy={4} fontSize={Y_AXIS_LABEL_FONT_SIZE} textAnchor="start" fill="currentColor">
                   {label}
                 </text>
               );
             }}
           />
           <Tooltip
-            formatter={(value: number) => [`$${value.toFixed(2)}`, "Cost"]}
+            formatter={(value) => [`$${Number(value).toFixed(2)}`, "Cost"]}
             contentStyle={{ backgroundColor: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", color: "var(--tooltip-text)" }}
             labelStyle={{ color: "var(--tooltip-text)" }}
           />
