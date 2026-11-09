@@ -16,11 +16,24 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cache_read: 0.25,
     cache_creation: 12.5,
   },
+  // Mythos 5.1 (Project Glasswing) has the same pricing as Fable 5.1
+  "claude-mythos-5-1": {
+    input: 10,
+    output: 50,
+    cache_read: 0.25,
+    cache_creation: 12.5,
+  },
   "claude-fable-5": {
     input: 10,
     output: 50,
     cache_read: 1,
     cache_creation: 12.5,
+  },
+  "claude-opus-5-5": {
+    input: 4,
+    output: 20,
+    cache_read: 0.2,
+    cache_creation: 5,
   },
   "claude-opus-5": {
     input: 5,
@@ -46,6 +59,12 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cache_read: 0.5,
     cache_creation: 6.25,
   },
+  "claude-sonnet-5-5": {
+    input: 2,
+    output: 10,
+    cache_read: 0.2,
+    cache_creation: 2.5,
+  },
   "claude-sonnet-5": {
     input: 3,
     output: 15,
@@ -57,6 +76,13 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     output: 15,
     cache_read: 0.3,
     cache_creation: 3.75,
+  },
+  // Haiku 5.5: prompts over 100K tokens cost $0.50 / $2.50, which is not modeled here
+  "claude-haiku-5-5": {
+    input: 0.1,
+    output: 0.5,
+    cache_read: 0.01,
+    cache_creation: 0.125,
   },
   "claude-haiku-4-5": {
     input: 1,
