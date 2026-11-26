@@ -33,6 +33,9 @@
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+// The same function ingest uses (Node 22.18+ / 23.6+ load the .ts directly).
+import { repoNameFromProjectDir as repoNameOf } from "../app/lib/repo-name.ts";
+const repoNameFromProjectDir = (projectDir) => repoNameOf(String(projectDir));
 
 // Kept in sync by hand with app/lib/db.server.ts.
 const SESSION_DAY_DELIM = "#";
@@ -45,13 +48,6 @@ const UNKNOWN_REPO = "(unknown)";
 const MAX_ROWS_PER_INSERT = 200; // SQLite caps a VALUES list at 500 rows.
 const MAX_BYTES_PER_FILE = 2 * 1024 * 1024; // Keep each file small for wrangler.
 
-/** Last path segment of a project directory. Mirrors repoNameFromProjectDir()
- *  in app/lib/db.server.ts; keep the two identical. */
-function repoNameFromProjectDir(projectDir) {
-  const norm = String(projectDir).replace(/\\/g, "/").replace(/\/+$/, "");
-  const seg = norm.slice(norm.lastIndexOf("/") + 1);
-  return seg || String(projectDir);
-}
 
 const isDay = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const dayOfTimestamp = (ts, fallback) =>

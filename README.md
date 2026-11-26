@@ -159,6 +159,8 @@ Every upload contains the cumulative totals of the whole session, and the ingest
 
 > **Cost.** The hook sends the cost Claude Code itself reports for the session (the transcript's `cost-state` record, which is priced per model). Claude Code writes that record only when a session ends, so mid-session uploads carry no reported cost and the dashboard prices their tokens with its own pricing table, marked as *estimated*. When a session that has already reported a cost is resumed, the tokens it adds are likewise estimated (stored in `sessions.uncosted_cost_usd`) until the next session end replaces the estimate with the exact total.
 
+> **Repository name.** The hook sends the full project directory; the dashboard names the repository after its last folder (`dashboard/app/lib/repo-name.ts`). When that folder only says which line of development it is (`trunk`, `head`, `dev`, `main`, `src`, …), the parent folders are prepended until a meaningful one is reached, so `D:\Dev\TMSR7\trunk` shows as `TMSR7/trunk`. A branch or tag checkout in the Subversion layout keeps the folder it sits in: `D:\Dev\TMSR7\branches\feature1` shows as `TMSR7/branches/feature1` and `D:\Dev\TMSR7\tags\v1.0` as `TMSR7/tags/v1.0`. The name is stored at ingest, so after changing the rule, rename the stored history with `node scripts/backfill-repo-name.mjs --remote` (from `dashboard/`; see the script's header) and apply the SQL it writes.
+
 ### How the Hook Works
 
 1. `Stop` fires after an assistant turn (throttled) or `SessionEnd` fires at session end

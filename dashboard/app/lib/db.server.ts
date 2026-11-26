@@ -12,6 +12,7 @@ import type {
   DashboardData,
 } from "./types";
 import { calculateEstimatedCost } from "./cost";
+import { repoNameFromProjectDir } from "./repo-name";
 
 // D1 bills by rows_read (rows scanned, index rows included), so every query
 // here is written to touch only the rows it needs: window filters hit an index
@@ -23,13 +24,7 @@ const UNSPECIFIED_SUBAGENT = "(unspecified)";
 const RECENT_SESSIONS_LIMIT = 20;
 const USER_RANKING_LIMIT = 10;
 
-/** Last path segment of a project directory. Windows backslashes are
- *  normalized so "D:\\Work\\repo" and "/home/me/repo" both yield "repo". */
-export function repoNameFromProjectDir(projectDir: string): string {
-  const norm = projectDir.replace(/\\/g, "/").replace(/\/+$/, "");
-  const seg = norm.slice(norm.lastIndexOf("/") + 1);
-  return seg || projectDir;
-}
+export { repoNameFromProjectDir };
 
 /** YYYY-MM-DD (UTC) of an ISO timestamp; `fallback` when it is malformed. */
 function dayOf(ts: string | undefined, fallback: string): string {
